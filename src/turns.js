@@ -8,6 +8,7 @@ import { CaptureValidator, areItemSetsEqual } from './captureLogic';
 let nextBuildId = 0;
 const generateBuildId = () => `build-${nextBuildId++}`;
 
+
 /**
  * Handles the build action.
  * [Previous handleBuild code remains unchanged]
