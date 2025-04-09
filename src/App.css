@@ -141,6 +141,41 @@ h1 {
     border-width: 3px;
 }
 
+/* Basic Pair Styling - Similar to Build */
+.pair {
+  width: 85px;
+  height: 125px;
+  border: 2px solid #4682B4; /* Steel blue border */
+  border-radius: 8px;
+  background-color: #f0f8ff; /* Alice blue background */
+  box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+  margin: 5px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Center content */
+  align-items: center; /* Center content */
+  padding: 5px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  text-align: center;
+  color: #333;
+}
+
+.pair:hover {
+  transform: scale(1.05);
+}
+
+.pair-rank {
+  font-weight: bold;
+  font-size: 1.1em;
+  margin-bottom: 5px;
+}
+
+.pair-cards {
+  font-size: 0.8em;
+  color: #555;
+}
 
 .table-area {
   background-color: #4CAF50; /* Green table */
@@ -162,7 +197,7 @@ h1 {
 }
 
 /* Add some space between items */
-.card + .card, .build + .build, .card + .build, .build + .card {
+.card + .card, .build + .build, .pair + .pair, .card + .build, .build + .card, .card + .pair, .pair + .card, .build + .pair, .pair + .build {
   /* margin-left: 5px; */ /* Use margin on all sides now */
 }
 
@@ -188,7 +223,7 @@ h1 {
   transform: scale(1.05); /* Keep hover effect */
 }
 
-.card.selected-table-card, .build.selected-table-card { /* Apply to selected cards OR builds */
+.card.selected-table-card, .build.selected-table-card, .pair.selected-table-card { /* Apply to selected cards, builds, OR pairs */
   border: 3px solid darkorange; /* Thicker border, different color */
    transform: scale(1.05); /* Keep hover effect */
 }
