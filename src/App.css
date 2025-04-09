@@ -1,0 +1,251 @@
+body {
+  background-color: #282c34;
+  color: white;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  margin: 0;
+}
+
+.App {
+  text-align: center;
+  padding: 10px;
+  width: 95%;
+  max-width: 800px;
+}
+
+h1 {
+  text-align: center;
+  font-size: 2em;
+  margin-bottom: 0.5em;
+}
+
+.game-board {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.player-area {
+  margin: 10px;
+  width: 100%;
+}
+
+.hand {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap; /* Allow hand cards to wrap */
+  margin-bottom: 5px;
+  min-height: 130px; /* Ensure space even when hand is empty */
+}
+
+.card {
+  width: 80px;
+  height: 120px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: #fff;
+  box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+  margin: 5px; /* Increased margin slightly */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  color: #333; /* Default text color for cards */
+}
+
+.card:hover {
+  transform: scale(1.05);
+}
+
+.rank {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  /* color: #333; */ /* Color is set dynamically */
+  font-size: 1.1em; /* Slightly larger rank */
+  font-weight: bold;
+}
+
+.suit {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  font-size: 1.5em; /* Larger suit symbol */
+}
+
+.heart {
+  color: red;
+}
+
+.diamond {
+  color: red;
+}
+
+.club {
+  color: black;
+}
+
+.spade {
+  color: black;
+}
+
+/* Basic Build Styling */
+.build {
+  width: 85px; /* Slightly wider */
+  height: 125px; /* Slightly taller */
+  border: 2px dashed #888; /* Dashed border */
+  border-radius: 8px;
+  background-color: #eee; /* Light gray background */
+  box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+  margin: 5px; /* Consistent margin */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Center content */
+  align-items: center; /* Center content */
+  padding: 5px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  text-align: center;
+  color: #333;
+}
+
+.build:hover {
+  transform: scale(1.05);
+}
+
+.build-value {
+  font-weight: bold;
+  font-size: 1.1em;
+  margin-bottom: 5px;
+}
+
+.build-cards {
+  font-size: 0.8em;
+  color: #555;
+}
+
+.simple-build {
+    border-style: dashed;
+}
+
+.compound-build {
+    border-style: double; /* Differentiate compound builds */
+    border-width: 3px;
+}
+
+
+.table-area {
+  background-color: #4CAF50; /* Green table */
+  padding: 15px; /* Increased padding */
+  border-radius: 8px;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  margin-bottom: 10px;
+  min-height: 160px; /* Ensure table area has some height */
+}
+
+.table-items { /* Renamed from .table-cards */
+  display: flex;
+  justify-content: center; /* Center items horizontally */
+  align-items: flex-start; /* Align items to the top */
+  flex-wrap: wrap; /* Allow items to wrap to the next line */
+  margin-bottom: 10px;
+  min-height: 130px; /* Ensure space for at least one row of cards */
+}
+
+/* Add some space between items */
+.card + .card, .build + .build, .card + .build, .build + .card {
+  /* margin-left: 5px; */ /* Use margin on all sides now */
+}
+
+/* Style the buttons */
+.card button {
+  margin-top: 3px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background-color: #007bff;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  font-size: 0.8em;
+}
+
+.card button:hover {
+  background-color: #0056b3;
+}
+
+.card.hand-card.selected { /* Specific selector for selected hand card */
+  border: 3px solid blue; /* Thicker border */
+  transform: scale(1.05); /* Keep hover effect */
+}
+
+.card.selected-table-card, .build.selected-table-card { /* Apply to selected cards OR builds */
+  border: 3px solid darkorange; /* Thicker border, different color */
+   transform: scale(1.05); /* Keep hover effect */
+}
+
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  background-color: #007bff;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  margin: 5px; /* Add margin to buttons */
+  font-size: 0.9em;
+}
+
+button:hover:not(:disabled) { /* Only apply hover effect if not disabled */
+  background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #555; /* Darker background for disabled */
+    cursor: not-allowed;
+}
+
+
+.actions {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column; /* Stack score and turn */
+  align-items: center;
+  justify-content: center;
+  padding: 5px; /* Add some padding */
+}
+
+.player-info .score {
+  margin-bottom: 5px; /* Add space between score and turn */
+  font-size: 1.1em;
+}
+
+.player-info > div {
+  text-align: center; /* Center the turn information */
+}
+
+.current-player {
+  background-color: rgba(255, 255, 255, 0.1); /* Slightly more visible highlight */
+  border-radius: 5px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.disabled {
+  opacity: 0.6;
+  cursor: not-allowed !important; /* Ensure cursor changes */
+  /* pointer-events: none; */ /* Optionally disable all pointer events */
+}
