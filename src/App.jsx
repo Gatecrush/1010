@@ -79,10 +79,11 @@ function App() {
   };
 
   const playTrail = () => {
-    // Rule: Cannot trail if controlling a build
+    // Rule: Cannot trail if controlling a build OR a pair
     const playerControlsBuild = tableItems.some(item => item.type === 'build' && item.controller === currentPlayer);
-    if (playerControlsBuild) {
-        alert("You cannot trail while controlling a build.");
+    const playerControlsPair = tableItems.some(item => item.type === 'pair' && item.controller === currentPlayer);
+    if (playerControlsBuild || playerControlsPair) {
+        alert("You cannot trail while controlling a build or a pair.");
         return;
     }
      // Rule: Cannot trail the last capturing card for a controlled build
@@ -498,6 +499,7 @@ function App() {
 
   // --- Rule Enforcement Calculations ---
   const playerControlsBuild = tableItems.some(item => item.type === 'build' && item.controller === currentPlayer);
+  const playerControlsPair = tableItems.some(item => item.type === 'pair' && item.controller === currentPlayer);
 
   // Helper to check if the selected card is the last one matching a controlled build
   const isLastCapturingCardForControlledBuild = (cardToCheck, hand, currentTableItems, playerNum) => {
@@ -543,7 +545,7 @@ function App() {
       return false; // If multiple items selected, or wrong item selected, it's not a forced capture (yet)
   };
 
-  const disableTrail = !selectedCard || hasPlayedCard || selectedTableItems.length > 0 || playerControlsBuild || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
+  const disableTrail = !selectedCard || hasPlayedCard || selectedTableItems.length > 0 || playerControlsBuild || playerControlsPair || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
   const disableCapture = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || (isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer) && !mustCaptureControlledBuild());
   const disableBuild = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
   const disablePair = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || selectedTableItems.some(i => i.type !== 'card');

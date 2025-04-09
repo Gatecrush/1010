@@ -1,25 +1,25 @@
 // scoring.js
-export const calculateScores = (player1Pile, player2Pile, player1Score, player2Score) => {
+export const calculateScores = (player1Pile, player2Pile, player1Score = 0, player2Score = 0) => {
   let p1Score = player1Score;
   let p2Score = player2Score;
 
-  // Most cards
-  if (player1Pile.length > player2Pile.length) {
+  // --- Most cards ---
+  if (player1Pile.length > 26 && player2Pile.length <= 26) {
     p1Score += 3;
-  } else if (player2Pile.length > player1Pile.length) {
+  } else if (player2Pile.length > 26 && player1Pile.length <= 26) {
     p2Score += 3;
-  }
+  } // Else if tied (both <= 26 or both > 26), no points awarded
 
-  // Most spades
+  // --- Most spades ---
   const p1Spades = player1Pile.filter((card) => card.suit === 'S').length;
   const p2Spades = player2Pile.filter((card) => card.suit === 'S').length;
   if (p1Spades > p2Spades) {
     p1Score += 1;
   } else if (p2Spades > p1Spades) {
     p2Score += 1;
-  }
+  } // Else if tied, no points awarded
 
-  // Card points
+  // --- Card points (Aces, Big Casino, Little Casino) ---
   player1Pile.forEach(card => {
     if (card.rank === 'A') p1Score += 1;
     if (card.suitRank === 'D10') p1Score += 2;
