@@ -26,7 +26,7 @@
     }
 
     /**
-     * Validates if a build action is possible, including cascading.
+     * Validates if a build action is possible, including increasing existing builds.
      */
     export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
       if (!playedCard || selectedItems.length === 0) {
@@ -41,91 +41,29 @@
       if (selectedItems.some(item => (item.type === 'build' && item.isCompound) || item.type === 'pair')) {
         return { isValid: false, message: "Cannot use compound builds or pairs in building." };
       }
-      // Rule: Cannot select multiple builds at once
-      if (selectedItems.filter(item => item.type === 'build').length > 1) {
-        return { isValid: false, message: "Cannot select multiple builds at once." };
-      }
 
       const playedCardValue = getBuildValue(playedCard);
+      let totalSelectedValue = selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+      let buildValue = playedCardValue + totalSelectedValue;
 
-      // Separate selected items: those intended to sum, and those that might match the target value
-      let potentialSummingItems = [];
-      let potentialMatchingItems = []; // Items that might already equal the target value
-
-      // Tentatively calculate target value based on played card + all selected items
-      // This helps identify which selected items might already match
-      const tempTargetValue = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-
-      selectedItems.forEach(item => {
-        const itemVal = getItemValue(item);
-        // If an item's value equals the tempTargetValue, it's potentially a matching item
-        // Or, more accurately, calculate the target value based on a subset first.
-        // Let's rethink: Identify the core summing group first.
-
-        // Assume the player intends to sum the played card with *some* selected items.
-        // Any *other* selected items must match the resulting sum.
-        potentialSummingItems.push(item); // Start by assuming all selected items are for summing
-      });
-
-      // Calculate the target value based on played card + potential summing items
-      const targetValue = playedCardValue + potentialSummingItems.reduce((sum, item) => sum + getItemValue(item), 0);
-
-      // Now, re-evaluate selectedItems: separate actual summing items from cascading items
-      let summingItems = [];
-      let cascadingItems = []; // Items that match the targetValue
-
-      selectedItems.forEach(item => {
-        const itemVal = getItemValue(item);
-        if (itemVal > 0 && itemVal === targetValue) {
-          // This item matches the target value, it's for cascading
-          // Ensure it's not a build being added to itself in a weird way
-          if (item.type === 'build' && (playedCardValue + summingItems.reduce((sum, sItem) => sum + getItemValue(sItem), 0)) !== targetValue) {
-            // This scenario is complex, disallow for now if a build matches but wasn't the sole item selected for modification
-            // This prevents selecting Build(7) + Card(7) when playing a 7 (should be capture or pair)
-            console.warn("Complex build scenario detected, potentially invalid selection.");
-          } else {
-            cascadingItems.push(item);
-          }
-        } else if (itemVal > 0) {
-          // This item is part of the sum
-          summingItems.push(item);
-        }
-      });
-
-      // Recalculate targetValue based *only* on the actual summing items
-      const finalTargetValue = playedCardValue + summingItems.reduce((sum, item) => sum + getItemValue(item), 0);
-
-      // If cascading items exist, their value must match the finalTargetValue
-      if (cascadingItems.length > 0 && cascadingItems.some(item => getItemValue(item) !== finalTargetValue)) {
-        return { isValid: false, message: `Selected matching items (value ${getItemValue(cascadingItems[0])}) do not match the build sum value (${finalTargetValue}).` };
-      }
-      // If cascading items exist, ensure they are only cards (cannot cascade builds/pairs)
-      if (cascadingItems.some(item => item.type !== 'card')) {
-        return { isValid: false, message: "Can only cascade matching cards into a build, not existing builds or pairs." };
+      // Check if increasing an existing build
+      let targetBuild = null;
+      if (selectedItems.length === 1 && selectedItems[0].type === 'build' && selectedItems[0].controller === currentPlayer) {
+        targetBuild = selectedItems[0];
+        buildValue = playedCardValue + targetBuild.value;
+        totalSelectedValue = targetBuild.value; // Adjust totalSelectedValue for message
       }
 
-      // Rule: Must hold a card matching the final target value IN HAND
-      const hasCapturingCard = playerHand.some(handCard =>
-        getBuildValue(handCard) === finalTargetValue &&
-        handCard.suitRank !== playedCard.suitRank
-      );
-      if (!hasCapturingCard) {
-        return { isValid: false, targetValue: finalTargetValue, message: `You must hold a ${finalTargetValue} in hand to make this build.` };
+      // Verify player has at least one card that can capture this build
+      if (!playerHand.some(card => getBuildValue(card) === buildValue)) {
+        return { isValid: false, message: "You must have a card in hand that can capture this build." };
       }
 
-      // Check if modifying an existing simple build (must be the only summing item of type build)
-      const targetBuild = summingItems.find(item => item.type === 'build' && !item.isCompound);
-      const isModification = !!targetBuild;
-
-      // Check for duplicate build value rule
-      const existingBuildOfValue = tableItems.find(item =>
-        item.type === 'build' && item.value === finalTargetValue && item.controller === currentPlayer
-      );
-      // If a build of this value exists, and we are NOT modifying it (i.e., targetBuild is null or different)
-      if (existingBuildOfValue && (!targetBuild || targetBuild.id !== existingBuildOfValue.id)) {
-        return { isValid: false, message: `You already have a build of ${finalTargetValue}. Select it to add to it.` };
+      // Check if the build value is valid (not exceeding 10)
+      if (buildValue > 10) {
+        return { isValid: false, message: "Build value cannot exceed 10." };
       }
 
       // If all checks pass
-      return { isValid: true, targetValue: finalTargetValue, isModification, targetBuild, summingItems, cascadingItems, message: `Build ${finalTargetValue} is valid.` };
+      return { isValid: true, buildValue: buildValue, targetBuild: targetBuild, message: `Build ${buildValue} is valid.` };
     };

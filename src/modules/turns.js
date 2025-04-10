@@ -19,69 +19,43 @@
       if (!validation.isValid) {
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
-      // Get detailed results from validation
-      const { targetValue, isModification, targetBuild, summingItems, cascadingItems } = validation;
+
+      const { buildValue, targetBuild } = validation;
 
       let newBuildObject;
-      // All selected items need to be removed
-      let itemsToRemoveIds = selectedItems.map(item => item.id);
-      // Cards that form the final build
-      let finalBuildCards = [playedCard];
+      let updatedTableItems = [...tableItems];
 
-      // Add cards from the items that summed up to the value
-      summingItems.forEach(item => {
-        if (item.type === 'card') {
-          finalBuildCards.push(item);
-        } else if (item.type === 'build') { // This is the targetBuild being modified
-          finalBuildCards.push(...item.cards);
-        }
-      });
-      // Add cards that were cascaded (already matched the target value)
-      cascadingItems.forEach(item => { // These should only be cards based on validation
-        finalBuildCards.push(item);
-      });
-
-      // Determine if compound
-      // It's compound if modifying, cascading, or if initial build had multiple components
-      let isCompound = isModification || cascadingItems.length > 0;
-      if (!isCompound) {
-        const playedCardBuildValue = combinationValue(playedCard.rank);
-        isCompound = playedCardBuildValue === targetValue || summingItems.some(item => combinationValue(item.rank) === targetValue);
-      }
-
-      // Create or update the build object
-      if (isModification && targetBuild) {
-        // Update existing build
+      if (targetBuild) {
+        // Increasing existing build
         newBuildObject = {
           ...targetBuild,
-          cards: finalBuildCards,
-          controller: currentPlayer,
-          isCompound: isCompound // Update compound status
+          value: buildValue,
+          cards: [...targetBuild.cards, playedCard],
         };
+        // Replace the old build with the new one
+        updatedTableItems = tableItems.map(item => item.id === targetBuild.id ? newBuildObject : item);
       } else {
-        // Create new build
+        // Create new build object
         newBuildObject = {
           type: 'build',
           id: generateBuildId(),
-          value: targetValue,
-          cards: finalBuildCards,
+          value: buildValue,
+          cards: [playedCard, ...selectedItems],
           controller: currentPlayer,
-          isCompound: isCompound,
+          isCompound: false, // Multiple builds are not compound by default
         };
+
+        // Filter out selected items from the table
+        updatedTableItems = tableItems.filter(item => !selectedItems.map(si => si.id).includes(item.id));
+
+        // Add the new build object to the table
+        updatedTableItems.push(newBuildObject);
       }
-
-      // Filter out ALL selected items that were used
-      let updatedTableItems = tableItems.filter(item => !itemsToRemoveIds.includes(item.id));
-
-      // Add the new/updated build object
-      // If modifying, the filter already removed the old one via itemsToRemoveIds
-      updatedTableItems.push(newBuildObject);
-
 
       return {
         success: true,
         newTableItems: updatedTableItems,
-        message: `Player ${currentPlayer} built ${targetValue}. ${isCompound ? '(Compound)' : '(Simple)'}`
+        message: `Player ${currentPlayer} created a build of ${buildValue}.`
       };
     };
 
