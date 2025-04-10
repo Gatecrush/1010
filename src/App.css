@@ -143,8 +143,8 @@ h1 {
 
 /* Basic Pair Styling - Similar to Build */
 .pair {
-  width: 85px;
-  height: 125px;
+  width: 85px; /* Slightly wider */
+  height: 125px; /* Slightly taller */
   border: 2px solid #4682B4; /* Steel blue border */
   border-radius: 8px;
   background-color: #f0f8ff; /* Alice blue background */
@@ -185,6 +185,13 @@ h1 {
   width: 100%;
   margin-bottom: 10px;
   min-height: 160px; /* Ensure table area has some height */
+}
+
+.table-header {
+  font-size: 0.9em; /* Smaller font size */
+  margin: 0; /* Remove default margins */
+  padding: 0; /* Remove default padding */
+  font-weight: normal; /* Make it normal weight */
 }
 
 .table-items { /* Renamed from .table-cards */
