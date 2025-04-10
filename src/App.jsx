@@ -153,10 +153,10 @@ function App() {
       if (captureResult.capturedCards && captureResult.capturedCards.length > 0) {
           if (currentPlayer === 1) {
             setPlayer1Pile([...player1Pile, ...captureResult.capturedCards]);
-            setPlayer1Hand(player1Hand.filter(card => card.suitRank !== selectedCard.suitRank));
+            // Hand update moved above state updates
           } else {
             setPlayer2Pile([...player2Pile, ...captureResult.capturedCards]);
-            setPlayer2Hand(player2Hand.filter(card => card.suitRank !== selectedCard.suitRank));
+            // Hand update moved above state updates
           }
       }
 
@@ -257,24 +257,32 @@ function App() {
     let finalP1Pile = [...player1Pile];
     let finalP2Pile = [...player2Pile];
     // Flatten remaining items into cards before adding
-    const remainingCards = tableItems.flatMap(item => item.type === 'card' ? [item] : item.cards); // Includes cards from builds AND pairs
+    const remainingCards = tableItems.flatMap(item =>
+        item.type === 'card' ? [item] : item.cards // Includes cards from builds AND pairs
+    );
+
+    let finalSweepBonusAwarded = false; // Flag to ensure bonus is only awarded once
 
     if (lastCapturer === 1) {
-        finalP1Pile = [...finalP1Pile, ...remainingCards];
+        finalP1Pile = [...finalP1Pile, ...remainingCards]; // Add cards to pile
+        // Award final sweep bonus point if there were remaining cards
+        if (remainingCards.length > 0) finalSweepBonusAwarded = true;
     } else if (lastCapturer === 2) {
         finalP2Pile = [...finalP2Pile, ...remainingCards];
+        // Award final sweep bonus point if there were remaining cards
+        if (remainingCards.length > 0) finalSweepBonusAwarded = true;
     } else {
         // Handle case where no one captured (optional, depends on rules variant)
         console.log("No last capturer, remaining cards discarded or split?");
     }
     setTableItems([]); // Clear table
 
-    const { p1Score, p2Score } = calculateScores(
-      finalP1Pile, // Use the final piles
-      finalP2Pile,
-      0, // Start score calculation from 0 for the final round
-      0
-    );
+    let { p1Score, p2Score } = calculateScores(finalP1Pile, finalP2Pile, 0, 0);
+
+    // Add the final sweep bonus point if applicable
+    if (finalSweepBonusAwarded) {
+        if (lastCapturer === 1) p1Score += 1; else if (lastCapturer === 2) p2Score += 1;
+    }
     setPlayer1Score(p1Score);
     setPlayer2Score(p2Score);
     setGamePhase('gameOver');
@@ -548,12 +556,12 @@ function App() {
   const disableTrail = !selectedCard || hasPlayedCard || selectedTableItems.length > 0 || playerControlsBuild || playerControlsPair || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
   const disableCapture = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || (isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer) && !mustCaptureControlledBuild());
   const disableBuild = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
-  const disablePair = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || selectedTableItems.some(i => i.type !== 'card');
+  const disablePair = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || (selectedTableItems.some(i => i.type !== 'card' && !(i.type === 'pair' && i.rank === selectedCard.rank)));
 
 
   return (
     <div className="App">
-      <h1>Omlongo</h1>
+      <h1>Omlongo♦</h1> {/* Changed heading here */}
       {gamePhase === 'initialDeal' && (
         <button onClick={initializeDeal}>Deal Initial Cards</button>
       )}
@@ -572,7 +580,7 @@ function App() {
 
           {/* Table Area */}
           <div className="table-area">
-            <h2>Table ({tableItems.length} items)</h2>
+            <h2 className="table-header">Table ({tableItems.length} items)</h2>
              {/* Display Builds separately if implemented */}
             <div className="table-items"> {tableItems.map(renderTableItem)} </div>
              <p>Round: {round}</p>
@@ -644,4 +652,3 @@ function App() {
 }
 
 export default App;
-
