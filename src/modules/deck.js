@@ -1,21 +1,44 @@
 // src/modules/deck.js
 
-// Default value (Ace=1, J/Q/K=10) - Used for combinations/scoring
-export const getValue = (rank) => {
-  if (["J", "Q", "K"].includes(rank)) return 10;
+// Value for scoring points (Ace=1, 10D=2, 2S=1, others=0 for point cards)
+// Also used for general card counting value where Ace=1, faces=10
+export const getScoringValue = (rank) => {
+  if (["J", "Q", "K"].includes(rank)) return 10; // Used for card counting if needed, not direct points
   if (rank === "A") return 1;
-  // Ensure rank is treated as a string for parseInt, handle potential non-numeric ranks gracefully
   const parsedValue = parseInt(String(rank), 10);
-  return isNaN(parsedValue) ? 0 : parsedValue; // Return 0 if not a number
+  return isNaN(parsedValue) ? 0 : parsedValue;
 };
 
-// Value map for captures (Ace=14, J=11, Q=12, K=13)
-export const captureValues = {
+// Value map for direct captures (Ace=14, J=11, Q=12, K=13) - Used ONLY for value combinations, NOT build capture
+// NOTE: This might be confusing. Let's reconsider its use vs rank matching.
+// For now, keep it for potential combination captures, but build capture logic will be separate.
+export const captureCombinationValues = {
     'A': 14, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13
 };
 
-// Value for combinations/building (Ace=1)
-export const combinationValue = (rank) => rank === 'A' ? 1 : getValue(rank);
+// Value for summing cards in combinations or builds (Ace=1, 2-10 face value)
+export const combinationValue = (rank) => {
+    if (rank === 'A') return 1;
+    if (["J", "Q", "K"].includes(rank)) return 0; // Face cards have no value in sums
+    const parsedValue = parseInt(String(rank), 10);
+    return isNaN(parsedValue) ? 0 : parsedValue;
+};
+
+// Helper to check if a card rank can capture a specific build sum value
+export const canRankCaptureBuildValue = (cardRank, buildValue) => {
+    if (buildValue < 1 || buildValue > 10) return false; // Invalid build value
+
+    if (buildValue === 1) {
+        return cardRank === 'A';
+    } else if (buildValue >= 2 && buildValue <= 9) {
+        // Check if cardRank is numerically equal to buildValue
+        const cardValue = parseInt(String(cardRank), 10);
+        return !isNaN(cardValue) && cardValue === buildValue;
+    } else if (buildValue === 10) {
+        return ['10', 'J', 'Q', 'K'].includes(cardRank);
+    }
+    return false;
+};
 
 
 export const createDeck = () => {
@@ -25,12 +48,10 @@ export const createDeck = () => {
 
   for (let suit of suits) {
     for (let rank of ranks) {
-      // Store default value (Ace=1) and capture value (Ace=14) if needed, or calculate on the fly
       deck.push({
           suit,
           rank,
-          value: getValue(rank), // Default value (Ace=1)
-          // captureValue: captureValues[rank], // Optional: store capture value directly
+          // value: getScoringValue(rank), // Maybe remove this default 'value' to avoid confusion
           suitRank: suit + rank
         });
     }
