@@ -30,94 +30,106 @@ const isFaceCard = (card) => {
 }
 
 /**
- * Validates if a build action is possible.
+ * Validates if a build action is possible, including cascading.
  */
 export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
   if (!playedCard || selectedItems.length === 0) {
     return { isValid: false, message: "Select a card from hand and items from table." };
   }
 
-  // Rule: Cannot use face cards in builds
+  // Rule: Cannot use face cards
   if (isFaceCard(playedCard) || selectedItems.some(item => item.type === 'card' && isFaceCard(item))) {
       return { isValid: false, message: "Face cards cannot be used in builds." };
   }
-  // Rule: Cannot build *on* a compound build or a pair
+  // Rule: Cannot build *on* or *select* compound builds or pairs for building
   if (selectedItems.some(item => (item.type === 'build' && item.isCompound) || item.type === 'pair')) {
-      return { isValid: false, message: "Cannot modify or add to compound builds or pairs." };
+      return { isValid: false, message: "Cannot use compound builds or pairs in building." };
   }
   // Rule: Cannot select multiple builds at once
   if (selectedItems.filter(item => item.type === 'build').length > 1) {
-      return { isValid: false, message: "Cannot modify multiple builds at once." };
+      return { isValid: false, message: "Cannot select multiple builds at once." };
   }
 
   const playedCardValue = getBuildValue(playedCard);
 
-  // Check if modifying an existing simple build (it must be the only build selected)
-  const targetBuild = selectedItems.find(item => item.type === 'build' && !item.isCompound);
-  const isModification = !!targetBuild; // True if targetBuild is found
+  // Separate selected items: those intended to sum, and those that might match the target value
+  let potentialSummingItems = [];
+  let potentialMatchingItems = []; // Items that might already equal the target value
 
-  let targetValue;
-  let isAddingSet = false;
+  // Tentatively calculate target value based on played card + all selected items
+  // This helps identify which selected items might already match
+  const tempTargetValue = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
-  if (isModification) {
-      // --- Scenario: Modifying/Adding to an Existing Build ---
-      const otherSelectedCards = selectedItems.filter(item => item.type === 'card');
-      const otherSelectedValue = otherSelectedCards.reduce((sum, item) => sum + getItemValue(item), 0);
-      const newValueFromAddition = playedCardValue + otherSelectedValue;
+  selectedItems.forEach(item => {
+      const itemVal = getItemValue(item);
+      // If an item's value equals the tempTargetValue, it's potentially a matching item
+      // Or, more accurately, calculate the target value based on a subset first.
+      // Let's rethink: Identify the core summing group first.
 
-      if (newValueFromAddition === targetBuild.value) {
-          // Case 1: Adding a set of the same value to the existing build
-          targetValue = targetBuild.value;
-          isAddingSet = true;
-          // Need to hold a card matching the build's value
-          const hasCapturingCard = playerHand.some(handCard =>
-              getBuildValue(handCard) === targetValue &&
-              handCard.suitRank !== playedCard.suitRank
-          );
-          if (!hasCapturingCard) {
-              return { isValid: false, targetValue, message: `You must hold a ${targetValue} in hand to add to this build.` };
+      // Assume the player intends to sum the played card with *some* selected items.
+      // Any *other* selected items must match the resulting sum.
+      potentialSummingItems.push(item); // Start by assuming all selected items are for summing
+  });
+
+  // Calculate the target value based on played card + potential summing items
+  const targetValue = playedCardValue + potentialSummingItems.reduce((sum, item) => sum + getItemValue(item), 0);
+
+  // Now, re-evaluate selectedItems: separate actual summing items from cascading items
+  let summingItems = [];
+  let cascadingItems = []; // Items that match the targetValue
+
+  selectedItems.forEach(item => {
+      const itemVal = getItemValue(item);
+      if (itemVal > 0 && itemVal === targetValue) {
+          // This item matches the target value, it's for cascading
+          // Ensure it's not a build being added to itself in a weird way
+          if (item.type === 'build' && (playedCardValue + summingItems.reduce((sum, sItem) => sum + getItemValue(sItem), 0)) !== targetValue) {
+             // This scenario is complex, disallow for now if a build matches but wasn't the sole item selected for modification
+             // This prevents selecting Build(7) + Card(7) when playing a 7 (should be capture or pair)
+             console.warn("Complex build scenario detected, potentially invalid selection.");
+          } else {
+             cascadingItems.push(item);
           }
-      } else {
-          // Case 2: Changing the value of the existing build (Not explicitly supported by rules yet, treat as invalid for now or implement later)
-          // For now, let's disallow changing the value directly this way.
-          // targetValue = playedCardValue + otherSelectedValue + targetBuild.value; // This would be the new value
-          // isAddingSet = false;
-          // // Need to hold a card matching the *new* target value
-          // const hasCapturingCard = playerHand.some(handCard => getBuildValue(handCard) === targetValue && handCard.suitRank !== playedCard.suitRank);
-          // if (!hasCapturingCard) {
-          //     return { isValid: false, targetValue, message: `You must hold a ${targetValue} in hand to change the build value.` };
-          // }
-          return { isValid: false, message: "Cannot change the value of an existing build this way. Add sets of the same value or capture." };
+      } else if (itemVal > 0) {
+          // This item is part of the sum
+          summingItems.push(item);
       }
+  });
 
-  } else {
-      // --- Scenario: Creating a New Build ---
-      // All selected items must be cards in this case
-      if (selectedItems.some(item => item.type !== 'card')) {
-          return { isValid: false, message: "Can only select cards when creating a new build." };
-      }
-      const selectedItemsValue = selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-      targetValue = playedCardValue + selectedItemsValue;
-      isAddingSet = false;
+  // Recalculate targetValue based *only* on the actual summing items
+  const finalTargetValue = playedCardValue + summingItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
-      // Check if player already controls a build of this value
-      const existingBuildOfValue = tableItems.find(item =>
-          item.type === 'build' && item.value === targetValue && item.controller === currentPlayer
-      );
-      if (existingBuildOfValue) {
-          return { isValid: false, message: `You already have a build of ${targetValue}. Select it to add to it.` };
-      }
+  // If cascading items exist, their value must match the finalTargetValue
+  if (cascadingItems.length > 0 && cascadingItems.some(item => getItemValue(item) !== finalTargetValue)) {
+      return { isValid: false, message: `Selected matching items (value ${getItemValue(cascadingItems[0])}) do not match the build sum value (${finalTargetValue}).` };
+  }
+  // If cascading items exist, ensure they are only cards (cannot cascade builds/pairs)
+  if (cascadingItems.some(item => item.type !== 'card')) {
+      return { isValid: false, message: "Can only cascade matching cards into a build, not existing builds or pairs." };
+  }
 
-      // Check if player holds the capturing card
-      const hasCapturingCard = playerHand.some(handCard =>
-          getBuildValue(handCard) === targetValue &&
-          handCard.suitRank !== playedCard.suitRank
-      );
-      if (!hasCapturingCard) {
-          return { isValid: false, targetValue, message: `You must hold a ${targetValue} in hand to create this build.` };
-      }
+  // Rule: Must hold a card matching the final target value IN HAND
+  const hasCapturingCard = playerHand.some(handCard =>
+      getBuildValue(handCard) === finalTargetValue &&
+      handCard.suitRank !== playedCard.suitRank
+  );
+  if (!hasCapturingCard) {
+    return { isValid: false, targetValue: finalTargetValue, message: `You must hold a ${finalTargetValue} in hand to make this build.` };
+  }
+
+  // Check if modifying an existing simple build (must be the only summing item of type build)
+  const targetBuild = summingItems.find(item => item.type === 'build' && !item.isCompound);
+  const isModification = !!targetBuild;
+
+  // Check for duplicate build value rule
+  const existingBuildOfValue = tableItems.find(item =>
+      item.type === 'build' && item.value === finalTargetValue && item.controller === currentPlayer
+  );
+  // If a build of this value exists, and we are NOT modifying it (i.e., targetBuild is null or different)
+  if (existingBuildOfValue && (!targetBuild || targetBuild.id !== existingBuildOfValue.id)) {
+      return { isValid: false, message: `You already have a build of ${finalTargetValue}. Select it to add to it.` };
   }
 
   // If all checks pass
-  return { isValid: true, targetValue, isModification, isAddingSet, targetBuild, message: `Build ${targetValue} is valid.` };
+  return { isValid: true, targetValue: finalTargetValue, isModification, targetBuild, summingItems, cascadingItems, message: `Build ${finalTargetValue} is valid.` };
 };
