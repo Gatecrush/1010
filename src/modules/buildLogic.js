@@ -42,28 +42,57 @@
         return { isValid: false, message: "Cannot use compound builds or pairs in building." };
       }
 
-      const playedCardValue = getBuildValue(playedCard);
-      let totalSelectedValue = selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-      let buildValue = playedCardValue + totalSelectedValue;
+      // Calculate build value differently based on what's selected
+      let buildValue;
+      let isCombiningWithExistingBuild = false;
 
-      // Check if increasing an existing build
-      let targetBuild = null;
-      if (selectedItems.length === 1 && selectedItems[0].type === 'build' && selectedItems[0].controller === currentPlayer) {
-        targetBuild = selectedItems[0];
-        buildValue = playedCardValue + targetBuild.value;
-        totalSelectedValue = targetBuild.value; // Adjust totalSelectedValue for message
+      // Case 1: Adding to an existing build you control (increasing build)
+      if (selectedItems.length === 1 &&
+        selectedItems[0].type === 'build' &&
+        selectedItems[0].controller === currentPlayer) {
+        buildValue = getBuildValue(playedCard) + selectedItems[0].value;
+        isCombiningWithExistingBuild = true;
+      }
+      // Case 2: Creating new build with table cards (ignore other builds in selection)
+      else {
+        // Filter out any builds from the value calculation
+        const nonBuildItems = selectedItems.filter(item => item.type !== 'build');
+        buildValue = getBuildValue(playedCard) +
+          nonBuildItems.reduce((sum, item) => sum + getItemValue(item), 0);
+
+        // Explicit check for the described scenario
+        if (selectedItems.length === 1 && selectedItems[0].rank === 'A' && tableItems.some(item => item.type === 'build' && item.value === buildValue && item.controller === currentPlayer)) {
+          // In this specific case, we allow the build even if there's an existing build of the same value
+          // This is because the player is using the Ace to create a new build, not increase an existing one
+        }
       }
 
-      // Verify player has at least one card that can capture this build
-      if (!playerHand.some(card => getBuildValue(card) === buildValue)) {
-        return { isValid: false, message: "You must have a card in hand that can capture this build." };
-      }
-
-      // Check if the build value is valid (not exceeding 10)
+      // Enforce maximum build value of 10
       if (buildValue > 10) {
-        return { isValid: false, message: "Build value cannot exceed 10." };
+        return {
+          isValid: false,
+          message: `Build value cannot exceed 10 (tried to build ${buildValue})`
+        };
       }
 
-      // If all checks pass
-      return { isValid: true, buildValue: buildValue, targetBuild: targetBuild, message: `Build ${buildValue} is valid.` };
+      // Verify player has capturing card (must be in hand, not counting the played card)
+      // For builds, we look for exact value match
+      const hasCaptureCard = playerHand.some(
+        card => card !== playedCard && getBuildValue(card) === buildValue
+      );
+
+      if (!hasCaptureCard) {
+        return {
+          isValid: false,
+          message: `You need a ${buildValue} in hand to capture this build.`
+        };
+      }
+
+      return {
+        isValid: true,
+        buildValue,
+        isCombiningWithExistingBuild,
+        selectedItems,
+        message: `Valid build for ${buildValue}`
+      };
     };

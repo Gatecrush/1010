@@ -11,6 +11,194 @@
     const generatePairId = () => `pair-${nextPairId++}`;
 
     /**
+     * Creates a new build or modifies an existing one.
+     * @param {object} validationResult - The result of validateBuild function.
+     * @param {object} playedCard - The card played from the hand.
+     * @param {number} currentPlayer - The ID of the current player.
+     * @returns {object} - The new or modified build object.
+     * @throws {Error} - If the validationResult is not valid.
+     */
+    const createBuild = (validationResult, playedCard, currentPlayer) => {
+      if (!validationResult.isValid) {
+        throw new Error("Cannot create invalid build");
+      }
+
+      const { buildValue, targetBuild, summingItems } = validationResult;
+
+      if (targetBuild) {
+        // 1. Increasing an Existing Build
+        return {
+          ...targetBuild,
+          value: buildValue,
+          cards: [...targetBuild.cards, playedCard], // Use 'cards' for consistency
+          modified: true
+        };
+      } else {
+        // 2. Creating a New Multiple Build
+        const selectedCards = summingItems.filter(item => item.type === 'card'); // Extract cards only
+        return {
+          type: 'build',
+          id: generateBuildId(), // Ensure ID generation
+          isCompound: summingItems.some(item => item.type === 'build'), // True if incorporating other builds
+          value: buildValue,
+          controller: currentPlayer,
+          cards: [playedCard, ...selectedCards], // Use 'cards' for consistency
+          modified: false
+        };
+      }
+    };
+
+    /**
+     * Validates if a player can capture a build.
+     * @param {object} playedCard - The card played from the hand.
+     * @param {object} targetBuild - The build object to capture.
+     * @param {number} currentPlayer - The ID of the current player.
+     * @returns {object} - An object containing the validation result.
+     */
+    const validateBuildCapture = (playedCard, targetBuild, currentPlayer) => {
+      if (!playedCard || !targetBuild) {
+        return { isValid: false, message: "Select a card from hand and a build from table." };
+      }
+
+      if (targetBuild.type !== 'build') {
+        return { isValid: false, message: "Selected item is not a build." };
+      }
+
+      if (targetBuild.controller !== currentPlayer) {
+        return { isValid: false, message: "Cannot capture opponent's builds." };
+      }
+
+      if (getValue(playedCard.rank) !== targetBuild.value) {
+        return { isValid: false, message: "Card value must match build value." };
+      }
+
+      return { isValid: true, message: "Valid build capture." };
+    };
+
+    /**
+     * Removes items from the table and returns the updated table items and captured cards.
+     * @param {array} tableItems - The current items on the table.
+     * @param {array} itemsToRemove - An array of items to remove from the table.
+     * @returns {object} - An object containing the updated table items and the captured cards.
+     */
+    const removeItemsFromTable = (tableItems, itemsToRemove) => {
+      const capturedCards = [];
+      const itemsToRemoveIds = itemsToRemove.map(item => item.id);
+
+      // Extract cards from items to remove
+      itemsToRemove.forEach(item => {
+        if (item.type === 'card') {
+          capturedCards.push(item);
+        } else if (item.type === 'build' || item.type === 'pair') {
+          capturedCards.push(...item.cards);
+        }
+      });
+
+      // Filter out removed items from the table
+      const updatedTableItems = tableItems.filter(item => !itemsToRemoveIds.includes(item.id));
+
+      return { updatedTableItems, capturedCards };
+    };
+
+    /**
+     * Handles cascading captures after an initial capture.
+     * @param {object} playedCard - The card played from the hand that initiated the capture.
+     * @param {array} tableItems - The current items on the table (cards, builds, pairs).
+     * @returns {object} - An object containing the remaining table items and the captured items.
+     */
+    const handleCascadingCaptures = (playedCard, tableItems) => {
+      let currentTable = [...tableItems];
+      let allCaptured = [];
+
+      // 1. Find all valid capture options based on the played card and the remaining table items
+      const validCaptureOptions = CaptureValidator.getValidCaptures(playedCard, currentTable);
+
+      if (validCaptureOptions.length === 0) {
+        // No more captures possible, return the current state
+        return {
+          remainingTable: currentTable,
+          capturedItems: allCaptured,
+        };
+      }
+
+      // 2. Process the captures
+      validCaptureOptions.forEach(captureSet => {
+        // Remove the captured items from the current table
+        const { updatedTableItems, capturedCards } = removeItemsFromTable(currentTable, captureSet);
+        currentTable = updatedTableItems;
+
+        // Add the captured items to the list of all captured items
+        allCaptured = [...allCaptured, ...capturedCards];
+      });
+
+      // 3. Recursively call handleCascadingCaptures with the updated table and captured items
+      return handleCascadingCaptures(playedCard, currentTable, allCaptured);
+    };
+
+    /**
+     * Handles the capture action, allowing for multiple independent captures and cascading captures.
+     */
+    export const handleCapture = (playedCard, selectedItems, currentPlayer,
+      player1Score, player2Score, tableItems, lastCapturer) => {
+
+      // 1. If capturing a build, validate the build capture
+      if (selectedItems.length === 1 && selectedItems[0].type === 'build') {
+        const validationResult = validateBuildCapture(playedCard, selectedItems[0], currentPlayer);
+        if (!validationResult.isValid) {
+          return {
+            success: false,
+            newP1Score: player1Score, newP2Score: player2Score,
+            newTableItems: tableItems, newLastCapturer: lastCapturer,
+            message: validationResult.message, capturedCards: []
+          };
+        }
+      }
+
+      // 2. Validate initial capture selection
+      const allValidOptions = CaptureValidator.getValidCaptures(playedCard, tableItems);
+      const isSelectionValid = isValidMultiCaptureSelection(selectedItems, allValidOptions);
+
+      if (!isSelectionValid) {
+        return {
+          success: false,
+          newP1Score: player1Score, newP2Score: player2Score,
+          newTableItems: tableItems, newLastCapturer: lastCapturer,
+          message: "Invalid capture selection.", capturedCards: []
+        };
+      }
+
+      // 3. Perform initial capture and remove items from table
+      const { updatedTableItems: initialTable, capturedCards: initialCaptured } = removeItemsFromTable(tableItems, selectedItems);
+
+      // 4. Handle cascading captures
+      const cascadingResult = handleCascadingCaptures(playedCard, initialTable);
+
+      // 5. Combine initial and cascading captures
+      const allCapturedCards = [playedCard, ...initialCaptured, ...cascadingResult.capturedItems];
+      const newTableItems = cascadingResult.remainingTable;
+
+      // 6. Calculate score
+      let currentP1Score = player1Score;
+      let currentP2Score = player2Score;
+      const pointsEarned = allCapturedCards.length - 1;
+      if (currentPlayer === 1) { currentP1Score += pointsEarned; }
+      else { currentP2Score += pointsEarned; }
+
+      // 7. Update last capturer
+      const newLastCapturer = currentPlayer;
+
+      return {
+        success: true,
+        newP1Score: currentP1Score,
+        newP2Score: currentP2Score,
+        newTableItems: newTableItems,
+        newLastCapturer: newLastCapturer,
+        message: `Player ${currentPlayer} captured ${allCapturedCards.length - 1} item(s).`,
+        capturedCards: allCapturedCards
+      };
+    };
+
+    /**
      * Handles the build action.
      */
     export const handleBuild = (playedCard, selectedItems, currentPlayer, tableItems, playerHand) => {
@@ -20,51 +208,37 @@
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
 
-      const { buildValue, targetBuild } = validation;
-
+      // Create the build using the createBuild function
       let newBuildObject;
+      try {
+        newBuildObject = createBuild(validation, playedCard, currentPlayer);
+      } catch (error) {
+        console.error("Error creating build:", error);
+        return { success: false, newTableItems: tableItems, message: error.message };
+      }
+
       let updatedTableItems = [...tableItems];
 
-      if (targetBuild) {
-        // Increasing existing build
-        newBuildObject = {
-          ...targetBuild,
-          value: buildValue,
-          cards: [...targetBuild.cards, playedCard],
-        };
-        // Replace the old build with the new one
-        updatedTableItems = tableItems.map(item => item.id === targetBuild.id ? newBuildObject : item);
+      if (validation.targetBuild) {
+        // Increasing existing build - replace the old build
+        updatedTableItems = tableItems.map(item => item.id === validation.targetBuild.id ? newBuildObject : item);
       } else {
-        // Create new build object
-        newBuildObject = {
-          type: 'build',
-          id: generateBuildId(),
-          value: buildValue,
-          cards: [playedCard, ...selectedItems],
-          controller: currentPlayer,
-          isCompound: false, // Multiple builds are not compound by default
-        };
-
-        // Filter out selected items from the table
+        // Creating a new build - remove selected items
         updatedTableItems = tableItems.filter(item => !selectedItems.map(si => si.id).includes(item.id));
-
-        // Add the new build object to the table
         updatedTableItems.push(newBuildObject);
       }
 
       return {
         success: true,
         newTableItems: updatedTableItems,
-        message: `Player ${currentPlayer} created a build of ${buildValue}.`
+        message: `Player ${currentPlayer} created a build of ${newBuildObject.value}.`
       };
     };
 
     /**
      * Handles the pairing action.
-     * [Previous handlePair code remains unchanged]
      */
     export const handlePair = (playedCard, selectedItems, currentPlayer, tableItems, playerHand) => {
-      // ... (previous pair logic) ...
       const validation = validatePair(playedCard, selectedItems, playerHand, tableItems, currentPlayer);
       if (!validation.isValid) {
         return { success: false, newTableItems: tableItems, message: validation.message };
@@ -114,128 +288,4 @@
         if (optionUsedIndex !== -1) { currentOptions.splice(optionUsedIndex, 1); }
       }
       return remainingSelectedItemIds.size === 0;
-    };
-
-    /**
-     * Handles the capture action, allowing for multiple independent captures.
-     * Sweep bonus logic removed from here.
-     */
-    export const handleCapture = (playedCard, selectedItems, currentPlayer,
-      player1Score, player2Score, tableItems, lastCapturer) => {
-
-      let capturedCards = [playedCard];
-      let currentP1Score = player1Score;
-      let currentP2Score = player2Score;
-      let newTableItems = [...tableItems];
-      let newLastCapturer = lastCapturer;
-      let cascading = true;
-      let initialMessage = `Player ${currentPlayer} captured ${selectedItems.length} item(s).`;
-
-      // Function to perform a single capture and return updated state
-      const performCapture = (card, selection, p1Score, p2Score, tableItems) => {
-        // 1. Find all theoretically valid individual captures
-        const allValidOptions = CaptureValidator.getValidCaptures(card, tableItems);
-
-        // 2. Check if the user's selection is a valid combination of one or more options
-        const isSelectionValid = isValidMultiCaptureSelection(selection, allValidOptions);
-
-        if (!isSelectionValid) {
-          return {
-            success: false,
-            newP1Score: p1Score, newP2Score: p2Score,
-            newTableItems: tableItems, newLastCapturer: newLastCapturer,
-            message: "Invalid capture selection.", capturedCards: []
-          };
-        }
-
-        // 3. Process the valid capture
-        let localCapturedCards = [card];
-
-        // Add cards from the selected items
-        selection.forEach(item => {
-          if (item.type === 'card') { localCapturedCards.push(item); }
-          else if (item.type === 'build' || item.type === 'pair') { localCapturedCards.push(...item.cards); }
-        });
-
-        // 4. TODO: Calculate points based on capturedCards (Aces, 10D, 2S etc.)
-        // Placeholder: just add 1 point per card captured for now
-        const pointsEarned = localCapturedCards.length - 1;
-        if (currentPlayer === 1) { p1Score += pointsEarned; }
-        else { p2Score += pointsEarned; }
-
-        // 5. Remove captured items from the table
-        if (!selection.every(item => item && item.id)) {
-          console.error("Cannot remove items - selection contains items without IDs");
-          return { success: false, message: "Internal error: Selected items missing IDs.", /* ... other state ... */ };
-        }
-        const selectedItemIds = selection.map(item => item.id);
-        const newTableItems = tableItems.filter(item => !selectedItemIds.includes(item.id));
-
-        newLastCapturer = currentPlayer;
-
-        return {
-          success: true,
-          newP1Score: p1Score,
-          newP2Score: p2Score,
-          newTableItems: newTableItems,
-          newLastCapturer: newLastCapturer,
-          capturedCards: localCapturedCards
-        };
-      };
-
-      // Initial capture
-      let captureResult = performCapture(playedCard, selectedItems, currentP1Score, currentP2Score, newTableItems);
-
-      if (!captureResult.success) {
-        return {
-          success: false,
-          newP1Score: player1Score, newP2Score: player2Score,
-          newTableItems: tableItems, newLastCapturer: lastCapturer,
-          message: "Invalid capture selection.", capturedCards: []
-        };
-      }
-
-      capturedCards.push(...captureResult.capturedCards);
-      currentP1Score = captureResult.newP1Score;
-      currentP2Score = captureResult.newP2Score;
-      newTableItems = captureResult.newTableItems;
-      newLastCapturer = captureResult.newLastCapturer;
-
-      // Cascading captures
-      while (cascading) {
-        // Find new capture opportunities with the played card
-        const newValidOptions = CaptureValidator.getValidCaptures(playedCard, newTableItems);
-
-        if (newValidOptions.length === 0) {
-          cascading = false;
-          break;
-        }
-
-        // For simplicity, capture the first valid option
-        const cascadingSelection = newValidOptions[0];
-
-        // Perform the cascading capture
-        captureResult = performCapture(playedCard, cascadingSelection, currentP1Score, currentP2Score, newTableItems);
-
-        if (!captureResult.success) {
-          cascading = false;
-          break;
-        }
-
-        capturedCards.push(...captureResult.capturedCards);
-        currentP1Score = captureResult.newP1Score;
-        currentP2Score = captureResult.newP2Score;
-        newTableItems = captureResult.newTableItems;
-        newLastCapturer = captureResult.newLastCapturer;
-      }
-
-      return {
-        success: true,
-        newP1Score: currentP1Score,
-        newP2Score: currentP2Score,
-        newTableItems: newTableItems,
-        newLastCapturer: newLastCapturer,
-        message: initialMessage,
-        capturedCards: capturedCards
-      };
     };
