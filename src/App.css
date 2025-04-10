@@ -284,3 +284,84 @@ button:disabled {
   cursor: not-allowed !important; /* Ensure cursor changes */
   /* pointer-events: none; */ /* Optionally disable all pointer events */
 }
+
+/* Media Queries for Mobile Optimization */
+@media (max-width: 600px) {
+  .App {
+    width: 100%; /* Take full width on small screens */
+    padding: 5px;
+  }
+
+  h1 {
+    font-size: 1.8em; /* Slightly smaller heading */
+  }
+
+  .card {
+    width: 70px; /* Smaller cards */
+    height: 95px;
+    font-size: 14px;
+    margin: 3px; /* Reduce margin */
+  }
+
+  .build, .pair {
+    width: 70px;
+    height: 100px;
+    margin: 3px;
+  }
+
+  .rank {
+    font-size: 1.2em;
+  }
+
+  .table-area {
+    padding: 8px; /* Reduce table padding */
+    min-height: 100px; /* Adjust table height */
+  }
+
+  .table-items {
+    min-height: 100px;
+  }
+
+  button {
+    padding: 8px 12px; /* Smaller button padding */
+    font-size: 0.8em;
+    margin: 3px;
+  }
+
+  .player-info .score {
+    font-size: 1em; /* Smaller score text */
+  }
+}
+
+/* Landscape Orientation */
+@media (max-height: 400px) and (orientation: landscape) {
+    .App {
+        flex-direction: row; /* Arrange side-by-side */
+        align-items: flex-start; /* Align to top */
+    }
+
+    .game-board {
+        flex-direction: row; /* Arrange game board horizontally */
+        align-items: flex-start;
+    }
+
+    .player-area {
+        width: 30%; /* Give player areas a fixed width */
+        margin: 5px;
+    }
+
+    .table-area {
+        width: 40%; /* Give table area more space */
+        min-height: auto; /* Reset min-height */
+        margin: 5px;
+    }
+
+    .hand {
+        min-height: 80px; /* Reduce hand height */
+    }
+
+    button {
+        font-size: 0.7em; /* Further reduce button font size */
+        padding: 4px 8px;
+    }
+}
