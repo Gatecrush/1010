@@ -4,152 +4,180 @@ import { getValue } from './deck'; // Assuming getValue handles Ace=1 for builds
 // Helper to get the build value of a card (Ace=1)
 const getBuildValue = (card) => {
     if (!card) return 0;
-    // Ensure rank is treated as a number if possible, default Ace to 1
     if (card.rank === 'A') return 1;
-    // J, Q, K have no build value
-    if (["J", "Q", "K"].includes(card.rank)) return 0;
+    if (["J", "Q", "K"].includes(card.rank)) return 0; // Face cards have no build value
     const numRank = parseInt(card.rank);
     return isNaN(numRank) ? 0 : numRank;
 };
 
 
-// Helper to get the value of a table item for building (card or simple build)
+// Helper to get the value of a table item for building/matching (card or simple build)
 const getItemValue = (item) => {
   if (!item) return 0;
+  // Ensure item has necessary properties before accessing them
+  if (!item.type) {
+      console.error("Item missing type:", item);
+      return 0;
+  }
   if (item.type === 'card') {
+    if (!item.rank) { console.error("Card item missing rank:", item); return 0; }
     return getBuildValue(item); // Use Ace=1, JQK=0
   }
-  if (item.type === 'build' && !item.isCompound) {
-    return item.value;
+  if (item.type === 'build') {
+     if (item.isCompound) return 0; // Compound builds have no value here
+     if (typeof item.value !== 'number') { console.error("Build item missing value:", item); return 0; }
+     return item.value;
   }
-  // Pairs, compound builds, and face cards cannot be built upon/with
+  // Pairs or other types have no value here
   return 0;
 };
 
 // Helper to check if a card is a face card
 const isFaceCard = (card) => {
+    if (!card || !card.rank) return false;
     return ['J', 'Q', 'K'].includes(card.rank);
 }
 
 /**
- * Validates if a build action is possible, including cascading.
+ * Validates if a build action is possible, handling complex selections
+ * by iterating through potential summing groups and validating remaining items match.
  */
 export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
-  if (!playedCard || selectedItems.length === 0) {
+  // --- Initial Checks ---
+  if (!playedCard || !selectedItems || selectedItems.length === 0) {
     return { isValid: false, message: "Select a card from hand and items from table." };
   }
-
-  // Rule: Cannot use face cards in builds (played or selected)
+   // Ensure all selected items are valid objects with IDs
+  if (!selectedItems.every(item => item && item.id)) {
+      console.error("Validation Error: Some selected items are invalid or missing IDs.");
+      return { isValid: false, message: "Internal error: Invalid items selected." };
+  }
   if (isFaceCard(playedCard) || selectedItems.some(item => item.type === 'card' && isFaceCard(item))) {
       return { isValid: false, message: "Face cards cannot be used in builds." };
   }
-  // Rule: Cannot build *on* or *select* compound builds or pairs for building
-  if (selectedItems.some(item => (item.type === 'build' && item.isCompound) || item.type === 'pair')) {
-      return { isValid: false, message: "Cannot use compound builds or pairs in building." };
+  if (selectedItems.some(item => item.type === 'pair' || (item.type === 'build' && item.isCompound))) {
+      return { isValid: false, message: "Cannot select pairs or compound builds for building." };
   }
-  // Rule: Cannot select multiple existing builds at once (can select one build + cards, or just cards)
-  if (selectedItems.filter(item => item.type === 'build').length > 1) {
-      return { isValid: false, message: "Cannot select multiple existing builds at once." };
-  }
-
   const playedCardValue = getBuildValue(playedCard);
-  if (playedCardValue === 0) { // Should be caught by face card check, but double-check
+  if (playedCardValue === 0) {
       return { isValid: false, message: "Played card has no build value." };
   }
 
-  // --- Determine Summing vs Cascading Items ---
-  let potentialSummingItems = [];
-  let potentialTargetBuild = null; // The single existing build being modified, if any
+  // --- Separate Target Build and Other Items ---
+  let targetBuild = null;
+  let otherSelectedItems = []; // Must be cards or simple builds
 
-  // Separate the potential build being modified from other selected items
-  selectedItems.forEach(item => {
-      if (item.type === 'build') { // Since we checked for >1 build earlier, this is the only one
-          potentialTargetBuild = item;
-      } else {
-          potentialSummingItems.push(item); // Assume cards are for summing initially
+  const selectedBuilds = selectedItems.filter(item => item.type === 'build');
+
+  if (selectedBuilds.length > 1) {
+      return { isValid: false, message: "Cannot select more than one existing build." };
+  } else if (selectedBuilds.length === 1) {
+      targetBuild = selectedBuilds[0];
+      // Ensure targetBuild is valid before proceeding
+      if (!targetBuild || !targetBuild.id) {
+           console.error("Validation Error: Invalid target build object.");
+           return { isValid: false, message: "Internal error: Invalid target build." };
       }
-  });
+      otherSelectedItems = selectedItems.filter(item => item.id !== targetBuild.id);
+  } else {
+      otherSelectedItems = selectedItems;
+  }
 
-  // Calculate the target value based on played card + potential summing items + target build (if any)
-  const targetValue = playedCardValue
-                      + potentialSummingItems.reduce((sum, item) => sum + getItemValue(item), 0)
-                      + (potentialTargetBuild ? potentialTargetBuild.value : 0);
+  // Ensure otherSelectedItems are valid types (cards or simple builds) and have IDs
+  if (otherSelectedItems.some(item => !item || !item.id || (item.type !== 'card' && !(item.type === 'build' && !item.isCompound)))) {
+       console.error("Validation Error: Invalid 'otherSelectedItems'.", otherSelectedItems);
+       return { isValid: false, message: "Invalid item selected for building (must be cards or simple builds)." };
+  }
 
-  // Now, re-evaluate the potentialSummingItems: which ones *actually* sum vs match?
-  let summingItems = []; // Cards actually used in the sum calculation
-  let cascadingItems = []; // Items (cards or simple builds) that match the targetValue
-
-  potentialSummingItems.forEach(item => { // These are only cards at this point
-      const itemVal = getItemValue(item);
-      if (itemVal > 0 && itemVal === targetValue) {
-          // This card matches the target value, it's for cascading
-          cascadingItems.push(item);
-      } else if (itemVal > 0) {
-          // This card is part of the sum
-          summingItems.push(item);
-      }
-      // Ignore items with value 0 (shouldn't happen if face cards excluded)
-  });
-
-  // If we are modifying an existing build, it's part of the "sum" conceptually
-  const targetBuild = potentialTargetBuild; // Rename for clarity
   const isModification = !!targetBuild;
+  const n = otherSelectedItems.length;
 
-  // Recalculate the final target value based *only* on the played card and actual summing items/build
-  const finalTargetValue = playedCardValue
-                           + summingItems.reduce((sum, item) => sum + getItemValue(item), 0)
-                           + (targetBuild ? targetBuild.value : 0);
+  // --- Iterate through Subsets of otherSelectedItems as potential summingGroups ---
+  // We iterate from 0 to 2^n - 1. i=0 represents the case where *only* the played card contributes value.
+  for (let i = 0; i < (1 << n); i++) {
+      const currentSummingGroup = [];
+      const currentRemainingIds = new Set(otherSelectedItems.map(item => item.id));
+      let summingGroupValue = 0;
 
+      // Build the currentSummingGroup based on the bits in i
+      for (let j = 0; j < n; j++) {
+          if ((i >> j) & 1) { // If the j-th item is in this subset
+              const item = otherSelectedItems[j];
+              // Basic check again inside loop for safety
+              if (!item || !item.id) { console.error("Loop Error: Invalid item in otherSelectedItems"); continue; }
+              currentSummingGroup.push(item);
+              summingGroupValue += getItemValue(item);
+              currentRemainingIds.delete(item.id);
+          }
+      }
 
-  // If cascading items exist, their value must match the finalTargetValue
-  if (cascadingItems.length > 0 && cascadingItems.some(item => getItemValue(item) !== finalTargetValue)) {
-      // This case should be rare if logic is correct, but good failsafe
-      return { isValid: false, message: `Selected matching items do not match the build sum value (${finalTargetValue}).` };
+      // Calculate the target value for this specific combination
+      const currentBuildValue = playedCardValue + summingGroupValue + (targetBuild ? getItemValue(targetBuild) : 0);
+      if (currentBuildValue <= 0) continue; // Builds must have a positive value
+
+      // Get the actual remaining items (potential matching group)
+      const currentRemainingItems = otherSelectedItems.filter(item => currentRemainingIds.has(item.id));
+
+      // --- Perform Checks for this Combination ---
+
+      // Check 1: Validate Matching Group
+      // Every item in the remaining group must have a value equal to the target build value
+      if (currentRemainingItems.some(item => getItemValue(item) !== currentBuildValue)) {
+          // console.log(`Subset ${i} failed: Remaining items don't match ${currentBuildValue}`);
+          continue; // Try next subset
+      }
+
+      // Check 2: Holding Card
+      const hasHoldingCard = playerHand.some(handCard =>
+          handCard && handCard.suitRank !== playedCard.suitRank && // Ensure handCard is valid and not the played card
+          getBuildValue(handCard) === currentBuildValue
+      );
+      if (!hasHoldingCard) {
+          // console.log(`Subset ${i} failed: Need holding card ${currentBuildValue}`);
+          continue; // Try next subset
+      }
+
+      // Check 3: Duplicate Build Check
+      const existingPlayerBuildOfValue = tableItems.find(item =>
+          item && item.id && // Ensure item on table is valid
+          item.type === 'build' &&
+          item.value === currentBuildValue &&
+          item.controller === currentPlayer &&
+          (!targetBuild || item.id !== targetBuild.id) // Exclude the build being modified
+      );
+      if (existingPlayerBuildOfValue) {
+          // console.log(`Subset ${i} failed: Duplicate build ${currentBuildValue}`);
+          continue; // Try next subset
+      }
+
+      // --- If all checks passed for this subset ---
+      // console.log(`Subset ${i} success: BuildValue=${currentBuildValue}, Summing=${currentSummingGroup.map(x=>x.id)}, Cascading=${currentRemainingItems.map(x=>x.id)}`);
+      return {
+          isValid: true,
+          buildValue: currentBuildValue, // The actual value of the resulting build
+          isModification: isModification,
+          targetBuild: targetBuild,
+          summingItems: currentSummingGroup, // The successful summing group
+          cascadingItems: currentRemainingItems, // The items that matched
+          message: `Build ${currentBuildValue} is valid.`
+      };
+
+  } // End of subset loop
+
+  // --- If no valid subset combination was found ---
+  // Calculate a potential target value based on *all* selected items for the error message
+  const fullSumValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+  const potentialFullTarget = playedCardValue + fullSumValue + (targetBuild ? getItemValue(targetBuild) : 0);
+
+  // Check if the holding card was the likely issue
+   const needsHoldingCardCheck = playerHand.some(handCard =>
+          handCard && handCard.suitRank !== playedCard.suitRank &&
+          getBuildValue(handCard) === potentialFullTarget
+      );
+
+  if (potentialFullTarget > 0 && !needsHoldingCardCheck) {
+       return { isValid: false, message: `Invalid combination. You might need a ${potentialFullTarget} in hand.` };
+  } else {
+       return { isValid: false, message: "Invalid build combination selected." };
   }
-
-  // Add the targetBuild itself to cascadingItems if its value matches the finalTargetValue
-  // This handles the case where you play a 7, select Build(7) -> target is 7, cascade Build(7)
-  if (targetBuild && !cascadingItems.some(c => c.id === targetBuild.id) && targetBuild.value === finalTargetValue) {
-      cascadingItems.push(targetBuild);
-      // If the targetBuild is now cascading, it's not being modified in the traditional sense
-      // It's just being grouped with the played card. Reset summingItems if needed.
-      // This logic gets complex. Let's simplify: If targetBuild.value === finalTargetValue,
-      // it means playedCard + summingItems must have summed to 0.
-      // This implies playedCard's value matched the targetBuild's value, and no other summing cards were selected.
-      // Example: Play 7, select Build(7). finalTargetValue=7. targetBuild.value=7.
-      // This is valid, targetBuild should be cascaded.
-  }
-
-
-  // Rule: Must hold a card matching the final target value IN HAND
-  const hasCapturingCard = playerHand.some(handCard =>
-      getBuildValue(handCard) === finalTargetValue &&
-      handCard.suitRank !== playedCard.suitRank // Cannot use the played card itself
-  );
-  if (!hasCapturingCard) {
-    return { isValid: false, targetValue: finalTargetValue, message: `You must hold a ${finalTargetValue} in hand to make this build.` };
-  }
-
-  // Rule: Cannot create a build value that duplicates an existing build *controlled by the player*,
-  // unless modifying that specific build.
-  const existingPlayerBuildOfValue = tableItems.find(item =>
-      item.type === 'build' &&
-      item.value === finalTargetValue &&
-      item.controller === currentPlayer &&
-      (!targetBuild || item.id !== targetBuild.id) // Exclude the build being modified
-  );
-  if (existingPlayerBuildOfValue) {
-      return { isValid: false, message: `You already control a build of ${finalTargetValue}. Select it to add to it.` };
-  }
-
-  // If all checks pass
-  return {
-      isValid: true,
-      targetValue: finalTargetValue,
-      isModification: isModification && !cascadingItems.some(c => c.id === targetBuild.id), // It's only modification if targetBuild wasn't cascaded
-      targetBuild: targetBuild, // The original build object being modified (if any)
-      summingItems: summingItems, // Cards used in the sum
-      cascadingItems: cascadingItems, // Cards/Builds matching the target value
-      message: `Build ${finalTargetValue} is valid.`
-  };
 };

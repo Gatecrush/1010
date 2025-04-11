@@ -22,11 +22,11 @@ export class CaptureValidator {
 
         // --- 1. Capture by Rank (Cards and Pairs) ---
         const rankMatchItems = tableItems.filter(item =>
-            (item.type === 'card' && item.rank === playedRank) ||
-            (item.type === 'pair' && item.rank === playedRank) // Include pairs matching the rank
+            item && item.id && // Ensure item exists and has ID
+            ((item.type === 'card' && item.rank === playedRank) ||
+             (item.type === 'pair' && item.rank === playedRank))
         );
         if (rankMatchItems.length > 0) {
-            // A single card captures ALL cards AND pairs of the same rank simultaneously
             validCaptureSets.push([...rankMatchItems]);
         }
 
@@ -34,17 +34,17 @@ export class CaptureValidator {
         if (isPlayedCardNumeric) {
             // --- 2a. Capture Builds by Capture Value (A=14, etc.) ---
             const buildCaptureValueMatches = tableItems.filter(item =>
-                item.type === 'build' && item.value === playedCaptureValue
+                item && item.id && item.type === 'build' && item.value === playedCaptureValue
             );
             buildCaptureValueMatches.forEach(build => {
-                validCaptureSets.push([build]); // Each matching build is a separate capture option
+                validCaptureSets.push([build]);
             });
 
             // --- 2b. Capture by Combination Value (A=1, etc.) ---
-            // Items eligible for combinations/direct match: individual numeric cards (Ace=1) and SIMPLE builds
             const combinableItems = tableItems.filter(item =>
-                (item.type === 'card' && !['J', 'Q', 'K'].includes(item.rank)) || // Numeric cards (A=1)
-                (item.type === 'build' && !item.isCompound) // Simple builds only
+                item && item.id && // Ensure item exists and has ID
+                ((item.type === 'card' && !['J', 'Q', 'K'].includes(item.rank)) ||
+                 (item.type === 'build' && !item.isCompound))
             );
 
             if (combinableItems.length > 0) {
@@ -53,29 +53,25 @@ export class CaptureValidator {
                     item.type === 'build' && item.value === playedCombinationValue
                 );
                 directBuildMatches.forEach(build => {
-                    // Add as a single-item capture set
                     validCaptureSets.push([build]);
                 });
 
                 // --- 2b-ii. Capture Combinations Summing to Combination Value (A=1) ---
                 const n = combinableItems.length;
-                for (let i = 1; i < (1 << n); i++) { // Iterate through all possible subsets
+                for (let i = 1; i < (1 << n); i++) {
                     const subset = [];
                     let currentSum = 0;
                     for (let j = 0; j < n; j++) {
-                        if ((i >> j) & 1) { // If the j-th item is in the subset
+                        if ((i >> j) & 1) {
                             const item = combinableItems[j];
-                            if (!item.id) { console.error("Combinable item missing ID:", item); continue; }
+                            // No need to check ID again here, already filtered in combinableItems
                             subset.push(item);
-                            // Use combination value (Ace=1 for cards, build.value for simple builds)
                             currentSum += (item.type === 'card' ? combinationValue(item.rank) : item.value);
                         }
                     }
-                    // Check if the sum matches the played card's combination value (A=1)
                     if (currentSum === playedCombinationValue && subset.length > 0) {
-                        // Ensure this exact combination isn't just the direct build match already added
-                        // (e.g., don't add subset [Build(7)] if it was added in 2b-i)
-                        if (!(subset.length === 1 && subset[0].type === 'build' && subset[0].value === playedCombinationValue)) {
+                        // Avoid adding subset if it's just the direct build match already added
+                        if (!(subset.length === 1 && subset[0].type === 'build' && directBuildMatches.some(db => db.id === subset[0].id))) {
                            validCaptureSets.push(subset);
                         }
                     }
@@ -83,7 +79,7 @@ export class CaptureValidator {
             }
         }
 
-        // --- 3. Remove duplicate/subset sets ---
+        // --- 3. Remove duplicate sets (based on item IDs) ---
         const uniqueSets = [];
         const seenSetSignatures = new Set();
 
@@ -96,10 +92,12 @@ export class CaptureValidator {
                     uniqueSets.push(set);
                 }
             } else {
-                console.error("Capture set contains item(s) without ID:", set);
+                // This should not happen if filtering above is correct
+                console.error("Capture set generation error: item missing ID in final set:", set);
             }
         });
 
+        // console.log("Generated Valid Captures for", playedCard.suitRank, ":", uniqueSets.map(s => s.map(i => i.id || i.suitRank))); // Debug Log
         return uniqueSets;
     }
 }
