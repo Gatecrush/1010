@@ -49,6 +49,28 @@
     };
 
     /**
+     * Creates a complex multi-group build
+     */
+    const createComplexBuild = (validationResult, currentPlayer) => {
+      const { buildValue, validGroups, playedCard, selectedItems } = validationResult;
+
+      // Get all cards involved in valid groups
+      // const allComponents = validGroups.flat();
+      const allSelectedCards = selectedItems.filter(item => item.type === 'card');
+
+      return {
+        type: 'build',
+        id: generateBuildId(),
+        isCompound: true,
+        value: buildValue,
+        controller: currentPlayer,
+        cards: [playedCard, ...allSelectedCards], // Add played card and selected cards
+        groups: validGroups, // Store the grouping information
+        modified: false
+      };
+    };
+
+    /**
      * Validates if a player can capture a build.
      * @param {object} playedCard - The card played from the hand.
      * @param {object} targetBuild - The build object to capture.
@@ -208,25 +230,38 @@
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
 
-      // Create the build using the createBuild function
+      const { buildValue, targetBuild, validGroups } = validation;
+
       let newBuildObject;
-      try {
-        newBuildObject = createBuild(validation, playedCard, currentPlayer);
-      } catch (error) {
-        console.error("Error creating build:", error);
-        return { success: false, newTableItems: tableItems, message: error.message };
+
+      if (targetBuild) {
+        // Increasing existing build
+        newBuildObject = {
+          ...targetBuild,
+          value: buildValue,
+          cards: [...targetBuild.cards, playedCard],
+        };
+      } else {
+        // Check if it's a complex build (multiple groups)
+        if (validGroups) {
+          newBuildObject = createComplexBuild(validation, currentPlayer);
+        }
+        else {
+          newBuildObject = {
+            type: 'build',
+            id: generateBuildId(),
+            value: buildValue,
+            controller: currentPlayer,
+            cards: selectedItems.filter(item => item.type === 'card'), // Ensure only cards are added
+          };
+        }
       }
 
       let updatedTableItems = [...tableItems];
-
-      if (validation.targetBuild) {
-        // Increasing existing build - replace the old build
-        updatedTableItems = tableItems.map(item => item.id === validation.targetBuild.id ? newBuildObject : item);
-      } else {
-        // Creating a new build - remove selected items
-        updatedTableItems = tableItems.filter(item => !selectedItems.map(si => si.id).includes(item.id));
-        updatedTableItems.push(newBuildObject);
-      }
+      // Remove selected items from the table
+      updatedTableItems = tableItems.filter(item => !selectedItems.map(si => si.id).includes(item.id));
+      // Add the new build object to the table
+      updatedTableItems.push(newBuildObject);
 
       return {
         success: true,
@@ -237,9 +272,11 @@
 
     /**
      * Handles the pairing action.
+     * [Previous handlePair code remains unchanged]
      */
     export const handlePair = (playedCard, selectedItems, currentPlayer, tableItems, playerHand) => {
-      const validation = validatePair(playedCard, selectedItems, playerHand, tableItems, currentPlayer);
+      // ... (previous pair logic) ...
+      const validation = validatePair(playedCard, selectedItems, currentPlayer, tableItems, playerHand);
       if (!validation.isValid) {
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
@@ -249,7 +286,7 @@
       const existingPair = selectedItems.length === 1 && selectedItems[0].type === 'pair' ? selectedItems[0] : null;
       if (existingPair) {
         newPairObject = { ...existingPair, cards: [...existingPair.cards, playedCard], controller: currentPlayer };
-        updatedTableItems = tableItems.map(item => (item.id === existingPair.id ? newPairObject : item));
+        updatedTableItems = tableItems.map(item => item.id === existingPair.id ? newPairObject : item));
       } else {
         const itemsToRemoveIds = selectedItems.map(item => item.id);
         const combinedCards = [playedCard, ...selectedItems];

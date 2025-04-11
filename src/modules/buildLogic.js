@@ -26,6 +26,64 @@
     }
 
     /**
+     * Helper to find all possible groups of numbers that sum to target
+     */
+    function findSumGroups(numbers, target, start = 0, current = [], result = []) {
+      if (current.reduce((sum, num) => sum + num, 0) === target) {
+        result.push([...current]);
+        return;
+      }
+
+      for (let i = start; i < numbers.length; i++) {
+        if (current.reduce((sum, num) => sum + num, 0) + numbers[i] > target) {
+          continue;
+        }
+        current.push(numbers[i]);
+        findSumGroups(numbers, target, i + 1, current, result);
+        current.pop();
+      }
+
+      return result;
+    }
+
+    /**
+     * Validates a complex multi-group build
+     */
+    export const validateComplexBuild = (playedCard, selectedItems, playerHand, targetValue) => {
+      // Filter out any invalid items first
+      const validItems = selectedItems.filter(item =>
+        item.type === 'card' && !isFaceCard(item)
+      );
+
+      // Include the played card in our items to analyze
+      const allItems = [...validItems, { type: 'card', ...playedCard }];
+      const itemValues = allItems.map(item => getBuildValue(item));
+
+      // Find all possible groups that sum to targetValue
+      const validGroups = findSumGroups(itemValues, targetValue);
+
+      if (validGroups.length === 0) {
+        return { isValid: false, message: "No valid card combinations for target value" };
+      }
+
+      // Check if player has card to capture this build
+      const hasCaptureCard = playerHand.some(
+        card => card !== playedCard && getBuildValue(card) === targetValue
+      );
+
+      if (!hasCaptureCard) {
+        return { isValid: false, message: `You need a ${targetValue} in hand to capture this build` };
+      }
+
+      return {
+        isValid: true,
+        targetValue,
+        validGroups,
+        message: `Valid multi-group build for ${targetValue}`
+      };
+    };
+
+    /**
      * Validates if a build action is possible, including increasing existing builds.
      */
     export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
@@ -42,57 +100,60 @@
         return { isValid: false, message: "Cannot use compound builds or pairs in building." };
       }
 
-      // Calculate build value differently based on what's selected
-      let buildValue;
-      let isCombiningWithExistingBuild = false;
+      const playedCardValue = getBuildValue(playedCard);
 
-      // Case 1: Adding to an existing build you control (increasing build)
-      if (selectedItems.length === 1 &&
-        selectedItems[0].type === 'build' &&
-        selectedItems[0].controller === currentPlayer) {
-        buildValue = getBuildValue(playedCard) + selectedItems[0].value;
-        isCombiningWithExistingBuild = true;
-      }
-      // Case 2: Creating new build with table cards (ignore other builds in selection)
-      else {
-        // Filter out any builds from the value calculation
-        const nonBuildItems = selectedItems.filter(item => item.type !== 'build');
-        buildValue = getBuildValue(playedCard) +
-          nonBuildItems.reduce((sum, item) => sum + getItemValue(item), 0);
+      // 1. Check if increasing an existing build
+      let targetBuild = null;
+      if (selectedItems.length === 1 && selectedItems[0].type === 'build' && selectedItems[0].controller === currentPlayer) {
+        targetBuild = selectedItems[0];
+        const buildValue = playedCardValue + targetBuild.value;
 
-        // Explicit check for the described scenario
-        if (selectedItems.length === 1 && selectedItems[0].rank === 'A' && tableItems.some(item => item.type === 'build' && item.value === buildValue && item.controller === currentPlayer)) {
-          // In this specific case, we allow the build even if there's an existing build of the same value
-          // This is because the player is using the Ace to create a new build, not increase an existing one
+        // Enforce maximum build value of 10
+        if (buildValue > 10) {
+          return { isValid: false, message: `Build value cannot exceed 10 (tried to build ${buildValue})` };
         }
+
+        // Verify player has capturing card (must be in hand, not counting the played card)
+        if (!playerHand.some(card => card !== playedCard && getBuildValue(card) === buildValue)) {
+          return { isValid: false, message: `You need a ${buildValue} in hand to capture this build.` };
+        }
+
+        return { isValid: true, buildValue: buildValue, targetBuild: targetBuild, message: `Valid build for ${buildValue}` };
       }
 
-      // Enforce maximum build value of 10
-      if (buildValue > 10) {
-        return {
-          isValid: false,
-          message: `Build value cannot exceed 10 (tried to build ${buildValue})`
-        };
+      // 2. Check if it's a complex build (multiple cards selected)
+      if (selectedItems.length > 1) {
+        // Calculate the target value (the value of the card in hand)
+        const targetValue = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+
+        // Enforce maximum build value of 10
+        if (targetValue > 10) {
+          return { isValid: false, message: `Build value cannot exceed 10 (tried to build ${targetValue})` };
+        }
+
+        // Call validateComplexBuild to handle the complex validation
+        return validateComplexBuild(playedCard, selectedItems, playerHand, targetValue, tableItems, currentPlayer);
       }
 
-      // Verify player has capturing card (must be in hand, not counting the played card)
-      // For builds, we look for exact value match
-      const hasCaptureCard = playerHand.some(
-        card => card !== playedCard && getBuildValue(card) === buildValue
-      );
+      // 3. Creating a new build with a single table card
+      else {
+        let totalValue = playedCardValue;
+        for (const item of selectedItems) {
+          if (item.type === 'card') {
+            totalValue += getBuildValue(item);
+          }
+        }
 
-      if (!hasCaptureCard) {
-        return {
-          isValid: false,
-          message: `You need a ${buildValue} in hand to capture this build.`
-        };
+        // Enforce maximum build value of 10
+        if (totalValue > 10) {
+          return { isValid: false, message: `Build value cannot exceed 10 (tried to build ${totalValue})` };
+        }
+
+        // Verify player has capturing card (must be in hand, not counting the played card)
+        if (!playerHand.some(card => card !== playedCard && getBuildValue(card) === totalValue)) {
+          return { isValid: false, message: `You need a ${totalValue} in hand to capture this build.` };
+        }
+
+        return { isValid: true, buildValue: totalValue, targetBuild: null, message: `Valid build for ${totalValue}` };
       }
-
-      return {
-        isValid: true,
-        buildValue,
-        isCombiningWithExistingBuild,
-        selectedItems,
-        message: `Valid build for ${buildValue}`
-      };
     };
