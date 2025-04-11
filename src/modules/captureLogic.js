@@ -5,6 +5,8 @@ export class CaptureValidator {
 
     /**
      * Finds all valid sets of table items that can be captured by the played card.
+     * Includes rank matches, value matches (A=14), combination sums (A=1),
+     * and direct build value matches (A=1).
      * @param {object} playedCard - The card played from the hand.
      * @param {array} tableItems - Current items on the table (cards, builds, pairs).
      * @returns {array<array<object>>} - An array of valid capture sets. Each set is an array of table items.
@@ -14,8 +16,9 @@ export class CaptureValidator {
 
         const validCaptureSets = [];
         const playedRank = playedCard.rank;
-        const playedCaptureValue = captureValues[playedRank]; // Use capture value (A=14 etc)
-        const isPlayedCardNumeric = !['J', 'Q', 'K'].includes(playedRank); // Ace is numeric here for value capture
+        const playedCaptureValue = captureValues[playedRank]; // Value for build capture (A=14, J=11...)
+        const playedCombinationValue = combinationValue(playedRank); // Value for sum/direct match (A=1, 2=2...)
+        const isPlayedCardNumeric = !['J', 'Q', 'K'].includes(playedRank); // Ace is numeric here
 
         // --- 1. Capture by Rank (Cards and Pairs) ---
         const rankMatchItems = tableItems.filter(item =>
@@ -29,26 +32,34 @@ export class CaptureValidator {
 
         // --- 2. Capture by Value (Only for Numeric Cards: 2-10, A) ---
         if (isPlayedCardNumeric) {
-            // --- 2a. Capture Builds by Value ---
-            const buildMatches = tableItems.filter(item =>
-                item.type === 'build' && item.value === playedCaptureValue // Build value must match card's capture value (A=14)
+            // --- 2a. Capture Builds by Capture Value (A=14, etc.) ---
+            const buildCaptureValueMatches = tableItems.filter(item =>
+                item.type === 'build' && item.value === playedCaptureValue
             );
-            buildMatches.forEach(build => {
+            buildCaptureValueMatches.forEach(build => {
                 validCaptureSets.push([build]); // Each matching build is a separate capture option
             });
 
-            // --- 2b. Capture Combinations by Value ---
-            // Items eligible for combinations: individual numeric cards (Ace=1) and SIMPLE builds
-            // PAIRS CANNOT BE USED IN VALUE COMBINATIONS
+            // --- 2b. Capture by Combination Value (A=1, etc.) ---
+            // Items eligible for combinations/direct match: individual numeric cards (Ace=1) and SIMPLE builds
             const combinableItems = tableItems.filter(item =>
                 (item.type === 'card' && !['J', 'Q', 'K'].includes(item.rank)) || // Numeric cards (A=1)
                 (item.type === 'build' && !item.isCompound) // Simple builds only
             );
 
             if (combinableItems.length > 0) {
+                // --- 2b-i. Direct Build Match (using Combination Value A=1) ---
+                const directBuildMatches = combinableItems.filter(item =>
+                    item.type === 'build' && item.value === playedCombinationValue
+                );
+                directBuildMatches.forEach(build => {
+                    // Add as a single-item capture set
+                    validCaptureSets.push([build]);
+                });
+
+                // --- 2b-ii. Capture Combinations Summing to Combination Value (A=1) ---
                 const n = combinableItems.length;
-                // Iterate through all possible subsets of combinable items
-                for (let i = 1; i < (1 << n); i++) { // Start from 1 to exclude empty set
+                for (let i = 1; i < (1 << n); i++) { // Iterate through all possible subsets
                     const subset = [];
                     let currentSum = 0;
                     for (let j = 0; j < n; j++) {
@@ -60,22 +71,24 @@ export class CaptureValidator {
                             currentSum += (item.type === 'card' ? combinationValue(item.rank) : item.value);
                         }
                     }
-                    if (currentSum === playedCaptureValue && subset.length > 0) {
-                        validCaptureSets.push(subset);
+                    // Check if the sum matches the played card's combination value (A=1)
+                    if (currentSum === playedCombinationValue && subset.length > 0) {
+                        // Ensure this exact combination isn't just the direct build match already added
+                        // (e.g., don't add subset [Build(7)] if it was added in 2b-i)
+                        if (!(subset.length === 1 && subset[0].type === 'build' && subset[0].value === playedCombinationValue)) {
+                           validCaptureSets.push(subset);
+                        }
                     }
                 }
             }
         }
 
-        // --- Remove duplicate/subset sets ---
-        // Example: If capturing [Card(7)] is valid and capturing [Card(7), Card(3), Card(4)] is valid,
-        // keep only the largest valid sets if they share items? Or allow user to choose?
-        // Current logic allows capturing just the 7 OR the 7+3+4 if both sum correctly.
-        // Let's stick with finding all distinct valid sets first.
+        // --- 3. Remove duplicate/subset sets ---
         const uniqueSets = [];
         const seenSetSignatures = new Set();
 
         validCaptureSets.forEach(set => {
+            // Ensure all items in the set have an ID before creating signature
             if (set.every(item => item && item.id)) {
                 const signature = set.map(item => item.id).sort().join(',');
                 if (!seenSetSignatures.has(signature)) {
@@ -93,13 +106,13 @@ export class CaptureValidator {
 
 // Helper function to compare if two arrays of items are the same set (order-independent)
 export const areItemSetsEqual = (set1, set2) => {
-    // ... (areItemSetsEqual function remains unchanged) ...
     if (!set1 || !set2 || set1.length !== set2.length) {
         return false;
     }
+    // Ensure items have IDs before comparing
     if (!set1.every(item => item && item.id) || !set2.every(item => item && item.id)) {
         console.error("Attempted to compare sets with missing IDs");
-        return false;
+        return false; // Cannot compare reliably
     }
     const ids1 = set1.map(item => item.id).sort();
     const ids2 = set2.map(item => item.id).sort();
