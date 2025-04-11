@@ -49,26 +49,6 @@
     };
 
     /**
-     * Creates a complex multi-group build
-     */
-    const createComplexBuild = (validationResult, playedCard, currentPlayer) => {
-      const { buildValue, validGroups, selectedItems } = validationResult;
-
-      const allSelectedCards = selectedItems.filter(item => item.type === 'card');
-
-      return {
-        type: 'build',
-        id: generateBuildId(),
-        isCompound: true,
-        value: buildValue,
-        controller: currentPlayer,
-        cards: [playedCard, ...allSelectedCards], // Add played card and selected cards
-        groups: validGroups, // Store the grouping information
-        modified: false
-      };
-    };
-
-    /**
      * Validates if a player can capture a build.
      * @param {object} playedCard - The card played from the hand.
      * @param {object} targetBuild - The build object to capture.
@@ -228,38 +208,25 @@
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
 
-      const { buildValue, targetBuild, validGroups } = validation;
-
+      // Create the build using the createBuild function
       let newBuildObject;
-
-      if (targetBuild) {
-        // Increasing existing build
-        newBuildObject = {
-          ...targetBuild,
-          value: buildValue,
-          cards: [...targetBuild.cards, playedCard],
-        };
-      } else {
-        // Check if it's a complex build (multiple groups)
-        if (validGroups) {
-          newBuildObject = createComplexBuild(validation, currentPlayer);
-        }
-        else {
-          newBuildObject = {
-            type: 'build',
-            id: generateBuildId(),
-            value: buildValue,
-            controller: currentPlayer,
-            cards: selectedItems.filter(item => item.type === 'card'), // Ensure only cards are added
-          };
-        }
+      try {
+        newBuildObject = createBuild(validation, playedCard, currentPlayer);
+      } catch (error) {
+        console.error("Error creating build:", error);
+        return { success: false, newTableItems: tableItems, message: error.message };
       }
 
       let updatedTableItems = [...tableItems];
-      // Remove selected items from the table
-      updatedTableItems = tableItems.filter(item => selectedItems.map(si => si.id).includes(item.id));
-      // Add the new build object to the table
-      updatedTableItems.push(newBuildObject);
+
+      if (validation.targetBuild) {
+        // Increasing existing build - replace the old build
+        updatedTableItems = tableItems.map(item => item.id === validation.targetBuild.id ? newBuildObject : item);
+      } else {
+        // Creating a new build - remove selected items
+        updatedTableItems = tableItems.filter(item => !selectedItems.map(si => si.id).includes(item.id));
+        updatedTableItems.push(newBuildObject);
+      }
 
       return {
         success: true,
@@ -276,32 +243,21 @@
       if (!validation.isValid) {
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
-
       const { rank } = validation;
       let updatedTableItems = [...tableItems];
       let newPairObject;
-
-      // Check if we're adding to an existing pair
       const existingPair = selectedItems.length === 1 && selectedItems[0].type === 'pair' ? selectedItems[0] : null;
-
       if (existingPair) {
-        // Add the played card to the existing pair
         newPairObject = { ...existingPair, cards: [...existingPair.cards, playedCard], controller: currentPlayer };
         updatedTableItems = tableItems.map(item => (item.id === existingPair.id ? newPairObject : item));
       } else {
-        // Create a new pair
         const itemsToRemoveIds = selectedItems.map(item => item.id);
         const combinedCards = [playedCard, ...selectedItems];
         newPairObject = { type: 'pair', id: generatePairId(), rank: rank, cards: combinedCards, controller: currentPlayer };
         updatedTableItems = tableItems.filter(item => !itemsToRemoveIds.includes(item.id));
         updatedTableItems.push(newPairObject);
       }
-
-      return {
-        success: true,
-        newTableItems: updatedTableItems,
-        message: `Player ${currentPlayer} paired ${rank}s.`,
-      };
+      return { success: true, newTableItems: updatedTableItems, message: `Player ${currentPlayer} paired ${rank}s.` };
     };
 
     /**

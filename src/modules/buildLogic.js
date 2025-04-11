@@ -26,64 +26,6 @@
     }
 
     /**
-     * Helper to find all possible groups of numbers that sum to target
-     */
-    function findSumGroups(numbers, target, start = 0, current = [], result = []) {
-      if (current.reduce((sum, num) => sum + num, 0) === target) {
-        result.push([...current]);
-        return;
-      }
-
-      for (let i = start; i < numbers.length; i++) {
-        if (current.reduce((sum, num) => sum + num, 0) + numbers[i] > target) {
-          continue;
-        }
-        current.push(numbers[i]);
-        findSumGroups(numbers, target, i + 1, current, result);
-        current.pop();
-      }
-
-      return result;
-    }
-
-    /**
-     * Validates a complex multi-group build
-     */
-    export const validateComplexBuild = (playedCard, selectedItems, playerHand, targetValue) => {
-      // Filter out any invalid items first
-      const validItems = selectedItems.filter(item =>
-        item.type === 'card' && !isFaceCard(item)
-      );
-
-      // Include the played card in our items to analyze
-      const allItems = [...validItems, { type: 'card', ...playedCard }];
-      const itemValues = allItems.map(item => getBuildValue(item));
-
-      // Find all possible groups that sum to targetValue
-      const validGroups = findSumGroups(itemValues, targetValue);
-
-      if (validGroups.length === 0) {
-        return { isValid: false, message: "No valid card combinations for target value" };
-      }
-
-      // Check if player has card to capture this build
-      const hasCaptureCard = playerHand.some(
-        card => card !== playedCard && getBuildValue(card) === targetValue
-      );
-
-      if (!hasCaptureCard) {
-        return { isValid: false, message: `You need a ${targetValue} in hand to capture this build` };
-      }
-
-      return {
-        isValid: true,
-        targetValue,
-        validGroups,
-        message: `Valid multi-group build for ${targetValue}`
-      };
-    };
-
-    /**
      * Validates if a build action is possible, including increasing existing builds.
      */
     export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
@@ -121,22 +63,9 @@
         return { isValid: true, buildValue: buildValue, targetBuild: targetBuild, message: `Valid build for ${buildValue}` };
       }
 
-      // 2. Check if it's a complex build (multiple cards selected)
-      if (selectedItems.length > 1) {
-        // Calculate the target value (the value of the card in hand)
-        const targetValue = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-
-        // Enforce maximum build value of 10
-        if (targetValue > 10) {
-          return { isValid: false, message: `Build value cannot exceed 10 (tried to build ${targetValue})` };
-        }
-
-        // Call validateComplexBuild to handle the complex validation
-        return validateComplexBuild(playedCard, selectedItems, playerHand, targetValue, tableItems, currentPlayer);
-      }
-
-      // 3. Creating a new build with a single table card
+      // 2. Creating a new build with table cards
       else {
+        // Calculate the total value of the selected cards
         let totalValue = playedCardValue;
         for (const item of selectedItems) {
           if (item.type === 'card') {
