@@ -51,11 +51,9 @@
     /**
      * Creates a complex multi-group build
      */
-    const createComplexBuild = (validationResult, currentPlayer) => {
-      const { buildValue, validGroups, playedCard, selectedItems } = validationResult;
+    const createComplexBuild = (validationResult, playedCard, currentPlayer) => {
+      const { buildValue, validGroups, selectedItems } = validationResult;
 
-      // Get all cards involved in valid groups
-      // const allComponents = validGroups.flat();
       const allSelectedCards = selectedItems.filter(item => item.type === 'card');
 
       return {
@@ -259,7 +257,7 @@
 
       let updatedTableItems = [...tableItems];
       // Remove selected items from the table
-      updatedTableItems = tableItems.filter(item => !selectedItems.map(si => si.id).includes(item.id));
+      updatedTableItems = tableItems.filter(item => selectedItems.map(si => si.id).includes(item.id));
       // Add the new build object to the table
       updatedTableItems.push(newBuildObject);
 
@@ -272,29 +270,38 @@
 
     /**
      * Handles the pairing action.
-     * [Previous handlePair code remains unchanged]
      */
     export const handlePair = (playedCard, selectedItems, currentPlayer, tableItems, playerHand) => {
-      // ... (previous pair logic) ...
-      const validation = validatePair(playedCard, selectedItems, currentPlayer, tableItems, playerHand);
+      const validation = validatePair(playedCard, selectedItems, playerHand, tableItems, currentPlayer);
       if (!validation.isValid) {
         return { success: false, newTableItems: tableItems, message: validation.message };
       }
+
       const { rank } = validation;
       let updatedTableItems = [...tableItems];
       let newPairObject;
+
+      // Check if we're adding to an existing pair
       const existingPair = selectedItems.length === 1 && selectedItems[0].type === 'pair' ? selectedItems[0] : null;
+
       if (existingPair) {
+        // Add the played card to the existing pair
         newPairObject = { ...existingPair, cards: [...existingPair.cards, playedCard], controller: currentPlayer };
-        updatedTableItems = tableItems.map(item => item.id === existingPair.id ? newPairObject : item));
+        updatedTableItems = tableItems.map(item => (item.id === existingPair.id ? newPairObject : item));
       } else {
+        // Create a new pair
         const itemsToRemoveIds = selectedItems.map(item => item.id);
         const combinedCards = [playedCard, ...selectedItems];
         newPairObject = { type: 'pair', id: generatePairId(), rank: rank, cards: combinedCards, controller: currentPlayer };
         updatedTableItems = tableItems.filter(item => !itemsToRemoveIds.includes(item.id));
         updatedTableItems.push(newPairObject);
       }
-      return { success: true, newTableItems: updatedTableItems, message: `Player ${currentPlayer} paired ${rank}s.` };
+
+      return {
+        success: true,
+        newTableItems: updatedTableItems,
+        message: `Player ${currentPlayer} paired ${rank}s.`,
+      };
     };
 
     /**
