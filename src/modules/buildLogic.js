@@ -10,7 +10,6 @@ const getBuildValue = (card) => {
     return isNaN(numRank) ? 0 : numRank;
 };
 
-
 // Helper to get the value of a table item for building/matching (card or simple build)
 const getItemValue = (item) => {
   if (!item) return 0;
