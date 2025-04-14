@@ -34,6 +34,7 @@ const isFaceCard = (card) => {
 
 /**
  * Validates if a build action is possible by checking against cards held in hand.
+ * Correctly handles both Adding and Matching initiation paths.
  */
 export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
   // --- Initial Checks ---
@@ -50,7 +51,6 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
       return { isValid: false, message: "Cannot select pairs or compound builds for building." };
   }
   const playedCardValue = getBuildValue(playedCard);
-  // Allow playedCardValue of 0 only if it's a face card (future proofing, though currently disallowed)
   if (playedCardValue === 0 && !isFaceCard(playedCard)) {
       return { isValid: false, message: "Played card has no build value." };
   }
@@ -71,16 +71,17 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
 
   // --- Iterate through Holding Cards to find a valid Target Value ---
   let validBuildFound = false;
-  let validationResult = { isValid: false, message: "Invalid build combination." }; // Default failure
+  // Store the most relevant error message if multiple checks fail
+  let bestErrorMessage = "Invalid build combination.";
 
   const potentialHoldingCards = playerHand.filter(card =>
       card && card.suitRank !== playedCard.suitRank && getBuildValue(card) > 0
   );
 
   for (const holdingCard of potentialHoldingCards) {
-      const targetValue = getBuildValue(holdingCard);
-      let currentSummingItems = []; // Items used to reach target in this iteration
+      const targetValue = getBuildValue(holdingCard); // This is the target value we aim for
       let isValidForThisTarget = false;
+      let currentSummingItems = []; // Reset for each holding card check
 
       // --- Check Duplicate Build (Common Check) ---
       const duplicateExists = tableItems.some(item =>
@@ -89,32 +90,40 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
           (!targetBuild || item.id !== targetBuild.id) // Exclude the one being modified
       );
       if (duplicateExists) {
-          // Store potential error message but continue checking other holding cards
-          validationResult = { isValid: false, message: `Cannot build ${targetValue}, you already control a build of that value.` };
-          continue; // Try next holding card
+          bestErrorMessage = `Cannot build ${targetValue}, you already control a build of that value.`;
+          continue; // Try next holding card, maybe another target value works
       }
 
       // --- Validate based on Case (Initiation vs Modification) ---
       if (!isModification) {
           // --- INITIATION Case ---
           const summingItems = selectedItems; // All selected items must be cards
-          if (summingItems.some(item => item.type !== 'card')) continue; // Invalid selection for initiation
+          if (summingItems.some(item => item.type !== 'card')) {
+              bestErrorMessage = "To start a build, select only cards from the table.";
+              continue; // This selection is fundamentally wrong for initiation
+          }
+          if (summingItems.length === 0) {
+               bestErrorMessage = "Select cards from the table to build with.";
+               continue; // Cannot initiate with only played card
+          }
 
           const sumOfSelected = summingItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
           // Path 1: Adding Path (Played card + selected = target)
           const neededFromTableAdding = targetValue - playedCardValue;
           if (neededFromTableAdding >= 0 && sumOfSelected === neededFromTableAdding) {
+              // Holding card check is implicit (targetValue comes from a holding card)
+              // Duplicate check done above
               isValidForThisTarget = true;
               currentSummingItems = summingItems;
           }
 
           // Path 2: Matching Path (Played card = target, selected = target)
-          // This holding card must match the target, which is checked by the loop.
-          // We need played card to match target, and selected to match target.
           if (!isValidForThisTarget && // Only check if adding path failed
-              playedCardValue === targetValue &&
-              sumOfSelected === targetValue) {
+              playedCardValue === targetValue && // Played card matches the target (derived from holding card)
+              sumOfSelected === targetValue) { // Selected cards also sum to the target
+               // Holding card check is implicit
+               // Duplicate check done above
                isValidForThisTarget = true;
                currentSummingItems = summingItems;
           }
@@ -122,9 +131,9 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
       } else {
           // --- MODIFICATION Case ---
           const otherSelectedItems = selectedItems.filter(item => item.id !== targetBuild.id);
-          // Ensure other items are valid for modification (cards or simple builds)
           if (otherSelectedItems.some(item => !item || !item.id || (item.type !== 'card' && !(item.type === 'build' && !item.isCompound)))) {
-              continue; // Invalid items selected with target build
+              bestErrorMessage = "Invalid item selected for modifying build.";
+              continue; // Invalid selection with target build
           }
 
           const neededFromTable = targetValue - playedCardValue - getItemValue(targetBuild);
@@ -132,42 +141,54 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
           if (neededFromTable >= 0) {
               const sumOfOthers = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
               if (sumOfOthers === neededFromTable) {
+                  // Holding card check is implicit
+                  // Duplicate check done above
                   isValidForThisTarget = true;
-                  currentSummingItems = otherSelectedItems; // These are the items summed *with* the played card and target build
+                  currentSummingItems = otherSelectedItems;
               }
           }
-          // Note: Complex subset/cascading logic for modification is removed in this approach for simplicity.
-          // It assumes all 'otherSelectedItems' contribute to the sum needed.
       }
 
       // --- If Valid Combination Found for this Target ---
       if (isValidForThisTarget) {
           validBuildFound = true;
-          validationResult = {
+          // Return immediately with the successful validation
+          return {
               isValid: true,
               buildValue: targetValue,
               isModification: isModification,
               targetBuild: targetBuild,
-              // If modifying, summingItems are 'otherSelectedItems', otherwise they are 'selectedItems'
               summingItems: currentSummingItems,
-              cascadingItems: [], // Cascading not handled in this simplified approach
+              cascadingItems: [], // Cascading not handled here
               message: `Build ${targetValue} is valid.`
           };
-          break; // Found a valid build, exit loop
+          // No need for break, return exits the function
+      } else {
+          // If this holding card didn't work, update potential error message
+          // Prioritize "duplicate" error, then maybe "holding card needed" based on adding path
+          if (!duplicateExists) { // Don't overwrite duplicate message
+             const potentialAddingTarget = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+             // Check if the *reason* this holding card failed might be because the user *actually*
+             // intended the 'adding' path which requires a different holding card.
+             if (!isModification && potentialAddingTarget > 0 && potentialAddingTarget !== targetValue) {
+                 const needsDifferentHolding = !playerHand.some(c => c && getBuildValue(c) === potentialAddingTarget);
+                 if (needsDifferentHolding) {
+                    bestErrorMessage = `Invalid build. You might need a ${potentialAddingTarget} in hand for that combination.`;
+                 }
+             } else if (isModification) {
+                 // Similar check for modification
+                 const potentialModTarget = playedCardValue + getItemValue(targetBuild) + selectedItems.filter(i => i.id !== targetBuild.id).reduce((s, i) => s + getItemValue(i), 0);
+                  if (potentialModTarget > 0 && potentialModTarget !== targetValue) {
+                     const needsDifferentHolding = !playerHand.some(c => c && getBuildValue(c) === potentialModTarget);
+                     if (needsDifferentHolding) {
+                        bestErrorMessage = `Invalid build. You might need a ${potentialModTarget} in hand for that combination.`;
+                     }
+                 }
+             }
+          }
       }
   } // End holding card loop
 
-  // If loop finished and no valid build found, provide best guess error
-  if (!validBuildFound && validationResult.isValid === false) {
-      // If the default message is still there, try to provide a holding card hint
-      if (validationResult.message === "Invalid build combination.") {
-           // Calculate potential target based on adding everything, as a guess
-           const potentialTarget = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-           if (potentialTarget > 0) {
-               validationResult.message = `Invalid build. Check if you hold a ${potentialTarget} or if the combination is valid.`;
-           }
-      }
-  }
-
-  return validationResult;
+  // If loop finished and no valid build found
+  return { isValid: false, message: bestErrorMessage };
 };
