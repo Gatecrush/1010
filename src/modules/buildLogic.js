@@ -34,7 +34,7 @@ const isFaceCard = (card) => {
 
 /**
  * Validates if a build action is possible using direct checks for initiation paths
- * and modification path.
+ * and modification path, with refined error reporting.
  */
 export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
   // --- Initial Checks ---
@@ -92,54 +92,67 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
       }
       const sumOfSelected = summingItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
-      // --- Check Adding Path ---
+      let addPathValid = false;
+      let matchPathValid = false;
+      let addPathError = null;
+      let matchPathError = null;
+
+      // --- Evaluate Adding Path ---
       const targetAdding = playedCardValue + sumOfSelected;
       if (targetAdding > 0) {
           const holdingAdding = checkHolding(targetAdding);
           const duplicateAdding = checkDuplicate(targetAdding);
           if (holdingAdding && !duplicateAdding) {
-              return {
-                  isValid: true, buildValue: targetAdding, isModification: false,
-                  targetBuild: null, summingItems: summingItems, cascadingItems: [],
-                  message: `Build ${targetAdding} is valid.`
-              };
-          }
-          // Store potential error message if adding path failed due to holding card
-          if (!holdingAdding && !duplicateAdding) {
-               validationResultAdding = { isValid: false, message: `Invalid build. You might need a ${targetAdding} in hand.` };
-          } else if (duplicateAdding) {
-               validationResultAdding = { isValid: false, message: `Cannot build ${targetAdding}, you already control a build of that value.` };
+              addPathValid = true;
+          } else {
+              // Store specific error for adding path
+              if (duplicateAdding) addPathError = `Cannot build ${targetAdding}, you already control a build of that value.`;
+              else if (!holdingAdding) addPathError = `Invalid build. You might need a ${targetAdding} in hand.`;
           }
       }
 
-      // --- Check Matching Path ---
+      // --- Evaluate Matching Path ---
       const targetMatching = sumOfSelected;
       if (targetMatching > 0 && playedCardValue === targetMatching) {
           const holdingMatching = checkHolding(targetMatching); // Need *another* card of this value
           const duplicateMatching = checkDuplicate(targetMatching);
           if (holdingMatching && !duplicateMatching) {
-               return {
-                  isValid: true, buildValue: targetMatching, isModification: false,
-                  targetBuild: null, summingItems: summingItems, cascadingItems: [],
-                  message: `Build ${targetMatching} is valid.`
-              };
+               matchPathValid = true;
+          } else {
+               // Store specific error for matching path
+               if (duplicateMatching) matchPathError = `Cannot build ${targetMatching}, you already control a build of that value.`;
+               else if (!holdingMatching) matchPathError = `Invalid build. You need another ${targetMatching} in hand.`;
           }
-           // Store potential error message if matching path failed
-           if (!holdingMatching && !duplicateMatching) {
-               validationResultMatching = { isValid: false, message: `Invalid build. You need another ${targetMatching} in hand.` };
-           } else if (duplicateMatching) {
-                validationResultMatching = { isValid: false, message: `Cannot build ${targetMatching}, you already control a build of that value.` };
-           }
       }
 
-      // If neither path valid, return the most relevant error message stored
-      return validationResultAdding || validationResultMatching || { isValid: false, message: "Invalid build initiation." };
+      // --- Return Result ---
+      if (addPathValid) {
+           return {
+              isValid: true, buildValue: targetAdding, isModification: false,
+              targetBuild: null, summingItems: summingItems, cascadingItems: [],
+              message: `Build ${targetAdding} is valid.`
+          };
+      }
+      if (matchPathValid) {
+           return {
+              isValid: true, buildValue: targetMatching, isModification: false,
+              targetBuild: null, summingItems: summingItems, cascadingItems: [],
+              message: `Build ${targetMatching} is valid.`
+          };
+      }
+
+      // If neither path valid, return the most relevant error
+      // Prioritize duplicate errors, then missing holding card errors
+      return { isValid: false, message: addPathError?.includes("already control") || matchPathError?.includes("already control")
+                                        ? (addPathError?.includes("already control") ? addPathError : matchPathError)
+                                        : (matchPathError?.includes("need another") ? matchPathError : addPathError)
+                                        || "Invalid build initiation." };
+
 
   } else {
       // --- MODIFICATION Case ---
       const otherSelectedItems = selectedItems.filter(item => item.id !== targetBuild.id);
       // Modification currently assumes all other selected items contribute to the sum.
-      // Complex cascading/matching during modification is not handled by this simplified check.
       if (otherSelectedItems.some(item => !item || !item.id || (item.type !== 'card' && !(item.type === 'build' && !item.isCompound)))) {
            return { isValid: false, message: "Invalid item selected for modifying build." };
       }
@@ -162,12 +175,11 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
           };
       } else {
           // Provide specific error for modification failure
-          if (!holdingMod) {
+          if (duplicateMod) {
+               return { isValid: false, message: `Cannot modify build to ${targetMod}, you already control another build of that value.` };
+          } else if (!holdingMod) {
               return { isValid: false, message: `Invalid modification. You need a ${targetMod} in hand.` };
-          } else if (duplicateMod) {
-              return { isValid: false, message: `Cannot modify build to ${targetMod}, you already control another build of that value.` };
           } else {
-              // Should not happen if checks above are correct
               return { isValid: false, message: "Invalid build modification." };
           }
       }
