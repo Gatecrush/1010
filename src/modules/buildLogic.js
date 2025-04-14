@@ -33,8 +33,8 @@ const isFaceCard = (card) => {
 }
 
 /**
- * Validates if a build action is possible by checking against cards held in hand.
- * Correctly handles both Adding and Matching initiation paths.
+ * Validates if a build action is possible using direct checks for initiation paths
+ * and modification path.
  */
 export const validateBuild = (playedCard, selectedItems, playerHand, tableItems, currentPlayer) => {
   // --- Initial Checks ---
@@ -69,126 +69,107 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
   }
   const isModification = !!targetBuild;
 
-  // --- Iterate through Holding Cards to find a valid Target Value ---
-  let validBuildFound = false;
-  // Store the most relevant error message if multiple checks fail
-  let bestErrorMessage = "Invalid build combination.";
-
-  const potentialHoldingCards = playerHand.filter(card =>
-      card && card.suitRank !== playedCard.suitRank && getBuildValue(card) > 0
+  // --- Helper: Check for holding card ---
+  const checkHolding = (value) => playerHand.some(card =>
+        card && card.suitRank !== playedCard.suitRank && getBuildValue(card) === value
+  );
+  // --- Helper: Check for duplicate build ---
+  const checkDuplicate = (value, excludeBuildId = null) => tableItems.some(item =>
+        item && item.id && item.type === 'build' &&
+        item.value === value && item.controller === currentPlayer &&
+        item.id !== excludeBuildId
   );
 
-  for (const holdingCard of potentialHoldingCards) {
-      const targetValue = getBuildValue(holdingCard); // This is the target value we aim for
-      let isValidForThisTarget = false;
-      let currentSummingItems = []; // Reset for each holding card check
-
-      // --- Check Duplicate Build (Common Check) ---
-      const duplicateExists = tableItems.some(item =>
-          item && item.id && item.type === 'build' &&
-          item.value === targetValue && item.controller === currentPlayer &&
-          (!targetBuild || item.id !== targetBuild.id) // Exclude the one being modified
-      );
-      if (duplicateExists) {
-          bestErrorMessage = `Cannot build ${targetValue}, you already control a build of that value.`;
-          continue; // Try next holding card, maybe another target value works
+  // --- Validate Based on Case ---
+  if (!isModification) {
+      // --- INITIATION Case ---
+      const summingItems = selectedItems; // All selected items must be cards
+      if (summingItems.some(item => item.type !== 'card')) {
+           return { isValid: false, message: "To start a build, select only cards from the table." };
       }
+      if (summingItems.length === 0) {
+           return { isValid: false, message: "Select cards from the table to build with." };
+      }
+      const sumOfSelected = summingItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
-      // --- Validate based on Case (Initiation vs Modification) ---
-      if (!isModification) {
-          // --- INITIATION Case ---
-          const summingItems = selectedItems; // All selected items must be cards
-          if (summingItems.some(item => item.type !== 'card')) {
-              bestErrorMessage = "To start a build, select only cards from the table.";
-              continue; // This selection is fundamentally wrong for initiation
+      // --- Check Adding Path ---
+      const targetAdding = playedCardValue + sumOfSelected;
+      if (targetAdding > 0) {
+          const holdingAdding = checkHolding(targetAdding);
+          const duplicateAdding = checkDuplicate(targetAdding);
+          if (holdingAdding && !duplicateAdding) {
+              return {
+                  isValid: true, buildValue: targetAdding, isModification: false,
+                  targetBuild: null, summingItems: summingItems, cascadingItems: [],
+                  message: `Build ${targetAdding} is valid.`
+              };
           }
-          if (summingItems.length === 0) {
-               bestErrorMessage = "Select cards from the table to build with.";
-               continue; // Cannot initiate with only played card
-          }
-
-          const sumOfSelected = summingItems.reduce((sum, item) => sum + getItemValue(item), 0);
-
-          // Path 1: Adding Path (Played card + selected = target)
-          const neededFromTableAdding = targetValue - playedCardValue;
-          if (neededFromTableAdding >= 0 && sumOfSelected === neededFromTableAdding) {
-              // Holding card check is implicit (targetValue comes from a holding card)
-              // Duplicate check done above
-              isValidForThisTarget = true;
-              currentSummingItems = summingItems;
-          }
-
-          // Path 2: Matching Path (Played card = target, selected = target)
-          if (!isValidForThisTarget && // Only check if adding path failed
-              playedCardValue === targetValue && // Played card matches the target (derived from holding card)
-              sumOfSelected === targetValue) { // Selected cards also sum to the target
-               // Holding card check is implicit
-               // Duplicate check done above
-               isValidForThisTarget = true;
-               currentSummingItems = summingItems;
-          }
-
-      } else {
-          // --- MODIFICATION Case ---
-          const otherSelectedItems = selectedItems.filter(item => item.id !== targetBuild.id);
-          if (otherSelectedItems.some(item => !item || !item.id || (item.type !== 'card' && !(item.type === 'build' && !item.isCompound)))) {
-              bestErrorMessage = "Invalid item selected for modifying build.";
-              continue; // Invalid selection with target build
-          }
-
-          const neededFromTable = targetValue - playedCardValue - getItemValue(targetBuild);
-
-          if (neededFromTable >= 0) {
-              const sumOfOthers = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-              if (sumOfOthers === neededFromTable) {
-                  // Holding card check is implicit
-                  // Duplicate check done above
-                  isValidForThisTarget = true;
-                  currentSummingItems = otherSelectedItems;
-              }
+          // Store potential error message if adding path failed due to holding card
+          if (!holdingAdding && !duplicateAdding) {
+               validationResultAdding = { isValid: false, message: `Invalid build. You might need a ${targetAdding} in hand.` };
+          } else if (duplicateAdding) {
+               validationResultAdding = { isValid: false, message: `Cannot build ${targetAdding}, you already control a build of that value.` };
           }
       }
 
-      // --- If Valid Combination Found for this Target ---
-      if (isValidForThisTarget) {
-          validBuildFound = true;
-          // Return immediately with the successful validation
+      // --- Check Matching Path ---
+      const targetMatching = sumOfSelected;
+      if (targetMatching > 0 && playedCardValue === targetMatching) {
+          const holdingMatching = checkHolding(targetMatching); // Need *another* card of this value
+          const duplicateMatching = checkDuplicate(targetMatching);
+          if (holdingMatching && !duplicateMatching) {
+               return {
+                  isValid: true, buildValue: targetMatching, isModification: false,
+                  targetBuild: null, summingItems: summingItems, cascadingItems: [],
+                  message: `Build ${targetMatching} is valid.`
+              };
+          }
+           // Store potential error message if matching path failed
+           if (!holdingMatching && !duplicateMatching) {
+               validationResultMatching = { isValid: false, message: `Invalid build. You need another ${targetMatching} in hand.` };
+           } else if (duplicateMatching) {
+                validationResultMatching = { isValid: false, message: `Cannot build ${targetMatching}, you already control a build of that value.` };
+           }
+      }
+
+      // If neither path valid, return the most relevant error message stored
+      return validationResultAdding || validationResultMatching || { isValid: false, message: "Invalid build initiation." };
+
+  } else {
+      // --- MODIFICATION Case ---
+      const otherSelectedItems = selectedItems.filter(item => item.id !== targetBuild.id);
+      // Modification currently assumes all other selected items contribute to the sum.
+      // Complex cascading/matching during modification is not handled by this simplified check.
+      if (otherSelectedItems.some(item => !item || !item.id || (item.type !== 'card' && !(item.type === 'build' && !item.isCompound)))) {
+           return { isValid: false, message: "Invalid item selected for modifying build." };
+      }
+
+      const sumOfOthers = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+      const targetMod = playedCardValue + sumOfOthers + getItemValue(targetBuild);
+
+      if (targetMod <= 0) {
+          return { isValid: false, message: "Modification results in invalid build value." };
+      }
+
+      const holdingMod = checkHolding(targetMod);
+      const duplicateMod = checkDuplicate(targetMod, targetBuild.id); // Exclude target build itself
+
+      if (holdingMod && !duplicateMod) {
           return {
-              isValid: true,
-              buildValue: targetValue,
-              isModification: isModification,
-              targetBuild: targetBuild,
-              summingItems: currentSummingItems,
-              cascadingItems: [], // Cascading not handled here
-              message: `Build ${targetValue} is valid.`
+              isValid: true, buildValue: targetMod, isModification: true,
+              targetBuild: targetBuild, summingItems: otherSelectedItems, cascadingItems: [], // Simplified: assumes others are summing
+              message: `Build ${targetMod} is valid.`
           };
-          // No need for break, return exits the function
       } else {
-          // If this holding card didn't work, update potential error message
-          // Prioritize "duplicate" error, then maybe "holding card needed" based on adding path
-          if (!duplicateExists) { // Don't overwrite duplicate message
-             const potentialAddingTarget = playedCardValue + selectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-             // Check if the *reason* this holding card failed might be because the user *actually*
-             // intended the 'adding' path which requires a different holding card.
-             if (!isModification && potentialAddingTarget > 0 && potentialAddingTarget !== targetValue) {
-                 const needsDifferentHolding = !playerHand.some(c => c && getBuildValue(c) === potentialAddingTarget);
-                 if (needsDifferentHolding) {
-                    bestErrorMessage = `Invalid build. You might need a ${potentialAddingTarget} in hand for that combination.`;
-                 }
-             } else if (isModification) {
-                 // Similar check for modification
-                 const potentialModTarget = playedCardValue + getItemValue(targetBuild) + selectedItems.filter(i => i.id !== targetBuild.id).reduce((s, i) => s + getItemValue(i), 0);
-                  if (potentialModTarget > 0 && potentialModTarget !== targetValue) {
-                     const needsDifferentHolding = !playerHand.some(c => c && getBuildValue(c) === potentialModTarget);
-                     if (needsDifferentHolding) {
-                        bestErrorMessage = `Invalid build. You might need a ${potentialModTarget} in hand for that combination.`;
-                     }
-                 }
-             }
+          // Provide specific error for modification failure
+          if (!holdingMod) {
+              return { isValid: false, message: `Invalid modification. You need a ${targetMod} in hand.` };
+          } else if (duplicateMod) {
+              return { isValid: false, message: `Cannot modify build to ${targetMod}, you already control another build of that value.` };
+          } else {
+              // Should not happen if checks above are correct
+              return { isValid: false, message: "Invalid build modification." };
           }
       }
-  } // End holding card loop
-
-  // If loop finished and no valid build found
-  return { isValid: false, message: bestErrorMessage };
+  }
 };
