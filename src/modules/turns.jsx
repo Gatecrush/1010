@@ -1,19 +1,17 @@
-
 // src/modules/turns.js
-// Import statements remain the same...
 import { validateBuild } from './buildLogic';
 import { validatePair } from './pairLogic';
 import { getValue, captureValues, combinationValue } from './deck';
 import { CaptureValidator, areItemSetsEqual } from './captureLogic';
 
-// ID generators remain the same...
+// Simple ID generator
 let nextBuildId = 0;
 const generateBuildId = () => `build-${nextBuildId++}`;
 let nextPairId = 0;
 const generatePairId = () => `pair-${nextPairId++}`;
 
 /**
- * Handles the build action, using the validated summing/cascading/multi-set groups.
+ * Handles the build action, including multi-group validation.
  */
 export const handleBuild = (playedCard, selectedItems, currentPlayer, tableItems, playerHand) => {
     // Pass all necessary context to validateBuild
@@ -31,26 +29,24 @@ export const handleBuild = (playedCard, selectedItems, currentPlayer, tableItems
     // --- Collect all cards for the new/updated build ---
     let finalBuildCards = [playedCard]; // Played card always goes into the build
 
-    // Add cards from the summingItems (the primary group in multi-set)
+    // Add cards from the summingItems
     summingItems.forEach(item => {
-        if (!item || !item.type) return;
+        if (!item || !item.type) return; // Safety check
         if (item.type === 'card') { finalBuildCards.push(item); }
-        else if (item.type === 'build' && item.cards) { finalBuildCards.push(...item.cards); }
+        else if (item.type === 'build' && item.cards) { finalBuildCards.push(...item.cards); } // Should only be simple builds
     });
 
-    // Add cards from the cascadingItems (items matching target in modification, or additional groups in multi-set)
+    // Add cards from the cascadingItems
     cascadingItems.forEach(item => {
-         if (!item || !item.type) return;
+        if (!item || !item.type) return; // Safety check
         if (item.type === 'card') { finalBuildCards.push(item); }
-        else if (item.type === 'build' && item.cards) { finalBuildCards.push(...item.cards); }
+        else if (item.type === 'build' && item.cards) { finalBuildCards.push(...item.cards); } // Should only be simple builds
     });
 
     // If it was a modification, add the original cards from the targetBuild
-    // Ensure not to double-add if targetBuild was also in summing/cascading (should be handled by validation structure)
-    if (isModification && targetBuild && targetBuild.cards) {
-        // Check if targetBuild's ID is already covered by summing/cascading groups
-        const targetProcessed = [...summingItems, ...cascadingItems].some(i => i.id === targetBuild.id);
-        if (!targetProcessed) {
+    // Ensure not to double-add if targetBuild was also in summing/cascading
+    if (isModification && targetBuild) {
+        if (!summingItems.some(i => i.id === targetBuild.id) && !cascadingItems.some(i => i.id === targetBuild.id)) {
              finalBuildCards.push(...targetBuild.cards);
         }
     }
@@ -98,8 +94,6 @@ export const handleBuild = (playedCard, selectedItems, currentPlayer, tableItems
     };
 };
 
-// --- handlePair, isValidMultiCaptureSelection, handleCapture functions remain unchanged from the previous version ---
-// (Include the full code for these functions here from the previous response)
 /**
  * Handles the pairing action.
  */
@@ -200,4 +194,106 @@ const isValidMultiCaptureSelection = (selectedItems, validCaptureOptions) => {
                  console.error("isValidMultiCaptureSelection Error: Option is not an array", validSet);
                  continue; // Skip invalid option
              }
-            const validSetIds = validSet.map
+            const validSetIds = validSet.map(item => item.id);
+            const canUseSet = validSetIds.length > 0 && validSetIds.every(id => remainingSelectedItemIds.has(id));
+
+            if (canUseSet) {
+                validSetIds.forEach(id => remainingSelectedItemIds.delete(id));
+                progressMade = true;
+                optionUsedIndex = i;
+                break;
+            }
+        }
+
+        if (optionUsedIndex !== -1) {
+            currentOptions.splice(optionUsedIndex, 1);
+        } else if (remainingSelectedItemIds.size > 0) {
+             return false; // No progress made, but items remain
+        }
+    }
+    return remainingSelectedItemIds.size === 0;
+};
+
+
+/**
+ * Handles the capture action, allowing for multiple independent captures.
+ */
+export const handleCapture = (playedCard, selectedItems, currentPlayer,
+    player1Score, player2Score, tableItems, lastCapturer) => {
+
+    // Basic validation
+    if (!playedCard || !selectedItems || !Array.isArray(selectedItems)) {
+         return { success: false, message: "Invalid input for capture.", /* other state */ };
+    }
+
+    const allValidOptions = CaptureValidator.getValidCaptures(playedCard, tableItems);
+    let isSelectionValid = isValidMultiCaptureSelection(selectedItems, allValidOptions);
+
+    // Fallback check for exact match if partitioning fails
+    if (!isSelectionValid && selectedItems.length > 0) {
+        for (const option of allValidOptions) {
+            if (areItemSetsEqual(selectedItems, option)) {
+                isSelectionValid = true;
+                break;
+            }
+        }
+    }
+
+    if (!isSelectionValid) {
+        return {
+            success: false,
+            newP1Score: player1Score, newP2Score: player2Score,
+            newTableItems: tableItems, newLastCapturer: lastCapturer,
+            message: "Invalid capture selection.", capturedCards: []
+        };
+    }
+
+    // Process the valid capture
+    let capturedCards = [playedCard];
+    let currentP1Score = player1Score;
+    let currentP2Score = player2Score;
+
+    selectedItems.forEach(item => {
+        if (!item) { console.error("Undefined item in selectedItems during capture processing"); return; }
+        if (item.type === 'card') { capturedCards.push(item); }
+        else if (item.type === 'build' || item.type === 'pair') {
+             if (item.cards && Array.isArray(item.cards)) {
+                 capturedCards.push(...item.cards);
+             } else {
+                 console.error("Build/Pair item missing cards array:", item);
+             }
+        }
+    });
+
+    // Remove captured items from the table
+     if (!selectedItems.every(item => item && item.id)) {
+        console.error("Cannot remove items - selection contains items without IDs");
+        return { success: false, message: "Internal error: Selected items missing IDs.", /* other state */ };
+    }
+    const selectedItemIds = selectedItems.map(item => item.id);
+    // Ensure tableItems are valid before filtering
+    const validTableItems = tableItems.filter(item => item && item.id);
+    const newTableItems = validTableItems.filter(item => !selectedItemIds.includes(item.id));
+
+
+    // Check for sweep
+    let sweepMessage = "";
+    // Sweep occurs if the table is cleared AND the table wasn't empty before the capture
+    if (newTableItems.length === 0 && validTableItems.length > 0) {
+        if (currentPlayer === 1) { currentP1Score += 1; }
+        else { currentP2Score += 1; }
+        sweepMessage = " Sweep!";
+    }
+
+    const newLastCapturer = currentPlayer;
+
+    return {
+        success: true,
+        newP1Score: currentP1Score,
+        newP2Score: currentP2Score,
+        newTableItems: newTableItems,
+        newLastCapturer: newLastCapturer,
+        message: `Player ${currentPlayer} captured ${selectedItems.length} item(s).${sweepMessage}`,
+        capturedCards: capturedCards
+    };
+};
