@@ -48,63 +48,6 @@ const getRankFromValue = (value) => {
     return String(value);
 };
 
-// --- Partitioning Helper Function (for Combination Builds) ---
-
-/**
- * Checks if a list of card values can be partitioned into k groups each summing to targetValue.
- * Uses backtracking.
- * @param {number[]} values - Array of card values.
- * @param {number} k - Number of groups required.
- * @param {number} targetValue - The target sum for each group.
- * @returns {boolean} True if partition is possible.
- */
-const canPartitionIntoKSubsets = (values, k, targetValue) => {
-    if (k === 0) return true; // Base case: no more groups needed
-    if (values.length === 0) return false; // Base case: no more values but groups needed
-
-    const n = values.length;
-    const used = Array(n).fill(false);
-    values.sort((a, b) => b - a); // Optimization: Sort descending
-
-    function backtrack(startIndex, currentSum, groupsRemaining) {
-        if (groupsRemaining === 0) return true; // All groups formed successfully
-
-        // If current group sum reaches target, start forming the next group
-        if (currentSum === targetValue) {
-            return backtrack(0, 0, groupsRemaining - 1);
-        }
-        // If sum exceeds target, this path is invalid
-        if (currentSum > targetValue) {
-            return false;
-        }
-
-        for (let i = startIndex; i < n; i++) {
-            if (!used[i]) {
-                // Optimization: If adding this value exceeds target, skip
-                if (currentSum + values[i] > targetValue) continue;
-
-                used[i] = true;
-                if (backtrack(i + 1, currentSum + values[i], groupsRemaining)) {
-                    return true; // Found a valid partition
-                }
-                used[i] = false; // Backtrack
-
-                // Optimization: Skip duplicate values to avoid redundant checks
-                while (i + 1 < n && values[i] === values[i + 1]) {
-                    i++;
-                }
-                 // Optimization: If adding the first element (values[0]) didn't work for a new group,
-                 // no other element will work either because they are smaller or equal.
-                 if (currentSum === 0) break;
-            }
-        }
-        return false; // No valid partition found from this state
-    }
-
-    // Start the backtracking process
-    return backtrack(0, 0, k);
-};
-
 
 // --- Validation Helper Functions ---
 
@@ -122,12 +65,21 @@ const checkInitialConditions = (playedCard, selectedItems) => {
     if (isFaceCard(playedCard)) {
         return { isValid: false, message: "Cannot use a face card to declare a build." };
     }
-    if (selectedItems.some(item =>
+    // Allow selecting existing builds ONLY when modifying
+    const selectedBuilds = selectedItems.filter(item => item.type === 'build');
+    if (selectedBuilds.length > 0 && selectedItems.length !== selectedBuilds.length) {
+         // Cannot mix selecting builds and cards unless modifying that specific build
+         if (selectedBuilds.length !== 1 || selectedItems.length === 1) {
+              return { isValid: false, message: "Cannot select cards and builds together unless modifying." };
+         }
+    }
+    // Check selected items themselves (excluding builds for now)
+    if (selectedItems.some(item => item.type !== 'build' && (
         (item.type === 'card' && isFaceCard(item)) ||
         item.type === 'pair' ||
-        (item.type === 'build' && item.isCompound)
-    )) {
-        return { isValid: false, message: "Cannot select face cards, pairs, or compound builds for building." };
+        (item.type === 'build' && item.isCompound) // Should be caught above, but double check
+    ))) {
+        return { isValid: false, message: "Cannot select face cards or pairs for building." };
     }
     return { isValid: true };
 };
@@ -177,19 +129,23 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
     if (selectedBuilds.length > 1) {
         return { isValid: false, message: "Cannot select more than one existing build." };
     } else if (selectedBuilds.length === 1) {
+        // This indicates modification attempt
         buildBeingModified = selectedBuilds[0];
         if (buildBeingModified.controller !== currentPlayer) {
             return { isValid: false, message: "Cannot modify a build you don't control." };
         }
+        // When modifying, otherSelectedItems are the *cards* selected alongside the build
         otherSelectedItems = selectedItems.filter(item => item.id !== buildBeingModified.id);
+        // Ensure only cards are selected alongside the build being modified
+        if (otherSelectedItems.some(item => item.type !== 'card')) {
+             return { isValid: false, message: "Can only select cards when adding to an existing build." };
+        }
     } else {
-        otherSelectedItems = selectedItems; // All selected items are cards
-    }
-
-    // Ensure otherSelectedItems are only cards
-    if (otherSelectedItems.some(item => item.type !== 'card')) {
-        console.error("Validation Error: 'otherSelectedItems' contain non-card items.", otherSelectedItems);
-        return { isValid: false, message: "Invalid item selected for building (must be cards)." };
+        // No build selected, attempt to create a new build. All selected items must be cards.
+        if (selectedItems.some(item => item.type !== 'card')) {
+             return { isValid: false, message: "Must select only cards to create a new build." };
+        }
+        otherSelectedItems = selectedItems;
     }
 
     const isModification = !!buildBeingModified;
@@ -200,6 +156,7 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
         // --- 3a. Modifying an Existing Build ---
         const targetCaptureRank = buildBeingModified.targetRank;
 
+        // Rule: Played card's rank must match the build's target rank to add to it
         if (playedCard.rank !== targetCaptureRank) {
             return { isValid: false, message: `Played card (${playedCard.rank}) must match the build's target rank (${targetCaptureRank}) to modify it.` };
         }
@@ -230,45 +187,58 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
 
     } else {
         // --- 3b. Creating a New Build ---
-        const targetCaptureRank = playedCard.rank; // Target rank is declared by the played card
-        const targetValue = getBuildValue(playedCard); // The value each group must sum to
+        const playedCardValue = getBuildValue(playedCard);
+        const selectedCardsValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
-        // Rule: Must hold another card matching the target capture rank
-        if (!checkForHoldingCard(targetCaptureRank, playedCard, playerHand)) {
-            return { isValid: false, message: `You need another ${targetCaptureRank} in hand to capture this build.` };
+        // Try Scenario A: Value Match Build
+        // Selected cards sum to played card's value?
+        if (selectedCardsValue === playedCardValue) {
+            const targetCaptureRank = playedCard.rank; // Target rank is played card's rank
+            const finalBuildValue = selectedCardsValue; // Value is sum of selected cards
+
+            if (!checkForHoldingCard(targetCaptureRank, playedCard, playerHand)) {
+                return { isValid: false, message: `You need another ${targetCaptureRank} in hand to capture this build.` };
+            }
+            if (checkForExistingBuildOfRank(targetCaptureRank, currentPlayer, tableItems, null)) {
+                return { isValid: false, message: `You already control a build for rank ${targetCaptureRank}.` };
+            }
+
+            return {
+                isValid: true,
+                buildValue: finalBuildValue,
+                targetRank: targetCaptureRank,
+                isModification: false,
+                targetBuild: null,
+                summingItems: otherSelectedItems,
+                message: `Creating build ${targetCaptureRank} (value matches played card).`
+            };
         }
 
-        // Rule: Cannot have multiple builds for the same capture rank
-        if (checkForExistingBuildOfRank(targetCaptureRank, currentPlayer, tableItems, null)) {
-            return { isValid: false, message: `You already control a build for rank ${targetCaptureRank}.` };
+        // Try Scenario B: Summation Build
+        // Played card + selected cards sum determines target rank
+        const finalBuildValue = playedCardValue + selectedCardsValue;
+        const targetCaptureRank = getRankFromValue(finalBuildValue);
+
+        if (targetCaptureRank) { // Check if the sum corresponds to a valid rank (A-10)
+            if (!checkForHoldingCard(targetCaptureRank, playedCard, playerHand)) {
+                return { isValid: false, message: `You need a ${targetCaptureRank} in hand to capture this build.` };
+            }
+            if (checkForExistingBuildOfRank(targetCaptureRank, currentPlayer, tableItems, null)) {
+                return { isValid: false, message: `You already control a build for rank ${targetCaptureRank}.` };
+            }
+
+            return {
+                isValid: true,
+                buildValue: finalBuildValue,
+                targetRank: targetCaptureRank,
+                isModification: false,
+                targetBuild: null,
+                summingItems: otherSelectedItems,
+                message: `Creating build ${targetCaptureRank} (value from sum).`
+            };
         }
 
-        // Combine played card and selected cards for partitioning check
-        const allCardsForBuild = [playedCard, ...otherSelectedItems];
-        const allValues = allCardsForBuild.map(getBuildValue);
-        const totalSum = allValues.reduce((a, b) => a + b, 0);
-
-        // Check if the total sum is divisible by the target value
-        if (totalSum === 0 || totalSum % targetValue !== 0) {
-             return { isValid: false, message: `Combination value (${totalSum}) is not divisible by target value (${targetValue} for rank ${targetCaptureRank}).` };
-        }
-
-        const k = totalSum / targetValue; // Number of groups needed
-
-        // Check if the combined cards can be partitioned
-        if (!canPartitionIntoKSubsets(allValues, k, targetValue)) {
-            return { isValid: false, message: `Selected cards cannot be combined with played card to form groups of ${targetValue}.` };
-        }
-
-        // If partition is possible, the build is valid
-        return {
-            isValid: true,
-            buildValue: targetValue, // The value of the build is the target value per group
-            targetRank: targetCaptureRank, // The rank needed to capture
-            isModification: false,
-            targetBuild: null,
-            summingItems: otherSelectedItems, // Table cards used
-            message: `Creating combination build ${targetCaptureRank}.`
-        };
+        // If neither Scenario A nor B worked
+        return { isValid: false, message: "Invalid combination for a new build." };
     }
 };
