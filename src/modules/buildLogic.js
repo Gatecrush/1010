@@ -10,7 +10,6 @@ const getBuildValue = (card) => {
     return isNaN(numRank) ? 0 : numRank;
 };
 
-
 // Helper to get the value of a table item for building/matching (card or simple build)
 const getItemValue = (item) => {
   if (!item) return 0;
@@ -67,12 +66,9 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
         return { isValid: false, message: "Cannot select face cards, pairs, or compound builds for building." };
     }
 
-    // --- Determine Target Rank from Played Card ---
+    // --- Determine Target Rank and Value from Played Card ---
     const targetBuildRank = playedCard.rank; // Rank declared by the played card (A, 2-10)
-    // const targetBuildValue = getBuildValue(playedCard); // Numerical value (1-10) - NO LONGER USED DIRECTLY
-    // if (targetBuildValue === 0) {
-    //     return { isValid: false, message: "Played card has no valid build value." };
-    // }
+    const playedCardValue = getBuildValue(playedCard);
 
     // --- Separate Target Build (if modifying) and Other Items ---
     let targetBuild = null; // The existing build being modified (if any)
@@ -101,41 +97,81 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
     }
 
     const isModification = !!targetBuild;
-    const n = otherSelectedItems.length; // Number of table items selected
 
-    // --- New Logic: Build to be captured later ---
-    let totalBuildValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+    // --- Single Build Logic ---
+    if (!isModification && selectedBuilds.length === 0) {
+        let totalBuildValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
-    // 1. Check for Holding Card (Check RANK)
-    // Must hold another card matching the RANK declared by the played card.
-    const hasHoldingCard = playerHand.some(handCard =>
-        handCard && handCard.suitRank !== playedCard.suitRank &&
-        handCard.rank === targetBuildRank
-    );
-    if (!hasHoldingCard) {
-        return { isValid: false, message: `You need another ${targetBuildRank} in hand to capture this build later.` };
+        // Check for Holding Card (Check RANK)
+        const hasHoldingCard = playerHand.some(handCard =>
+            handCard && handCard.suitRank !== playedCard.suitRank &&
+            handCard.rank === targetBuildRank
+        );
+
+        // Check for existing build of same rank
+        const existingPlayerBuildOfRank = tableItems.find(item =>
+            item && item.id &&
+            item.type === 'build' &&
+            item.cards.some(card => card.rank === targetBuildRank) && // Check if ANY card in the build has the target rank
+            item.controller === currentPlayer
+        );
+
+        if (!hasHoldingCard) {
+            return { isValid: false, message: `You need another ${targetBuildRank} in hand to capture this build later.` };
+        }
+
+        if (existingPlayerBuildOfRank) {
+            return { isValid: false, message: `You already control a build that can be captured with a ${targetBuildRank}.` };
+        }
+
+        return {
+            isValid: true,
+            buildValue: totalBuildValue, // The value of the resulting build
+            isModification: isModification,
+            targetBuild: targetBuild,
+            summingItems: otherSelectedItems, // All selected items are summing items
+            cascadingItems: [], // No cascading items in this logic
+            message: `Single build of ${targetBuildRank} with value ${totalBuildValue}.`
+        };
     }
 
-    // 2. Duplicate Build Check (Rank-Based)
-     const existingPlayerBuildOfRank = tableItems.find(item =>
-        item && item.id &&
-        item.type === 'build' &&
-        item.cards.some(card => card.rank === targetBuildRank) && // Check if ANY card in the build has the target rank
-        item.controller === currentPlayer &&
-        (!targetBuild || item.id !== targetBuild.id) // Exclude the build being modified
-    );
-    if (existingPlayerBuildOfRank) {
-        return { isValid: false, message: `You already control a build that can be captured with a ${targetBuildRank}.` };
+    // --- Multi-Build Logic (Adding to existing builds) ---
+    if (isModification || selectedBuilds.length > 0) {
+        let totalBuildValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
+
+        // Check for Holding Card (Check RANK)
+        const hasHoldingCard = playerHand.some(handCard =>
+            handCard && handCard.suitRank !== playedCard.suitRank &&
+            handCard.rank === targetBuildRank
+        );
+
+        // Check for existing build of same rank
+        const existingPlayerBuildOfRank = tableItems.find(item =>
+            item && item.id &&
+            item.type === 'build' &&
+            item.cards.some(card => card.rank === targetBuildRank) && // Check if ANY card in the build has the target rank
+            item.controller === currentPlayer &&
+            (!targetBuild || item.id !== targetBuild.id) // Exclude the build being modified
+        );
+
+        if (!hasHoldingCard) {
+            return { isValid: false, message: `You need another ${targetBuildRank} in hand to capture this build later.` };
+        }
+
+        if (existingPlayerBuildOfRank) {
+            return { isValid: false, message: `You already control a build that can be captured with a ${targetBuildRank}.` };
+        }
+
+        return {
+            isValid: true,
+            buildValue: totalBuildValue, // The value of the resulting build
+            isModification: isModification,
+            targetBuild: targetBuild,
+            summingItems: otherSelectedItems, // All selected items are summing items
+            cascadingItems: [], // No cascading items in this logic
+            message: `Multi-build towards ${targetBuildRank}.`
+        };
     }
 
-    // --- If all checks passed ---
-    return {
-        isValid: true,
-        buildValue: totalBuildValue, // The value of the resulting build
-        isModification: isModification,
-        targetBuild: targetBuild,
-        summingItems: otherSelectedItems, // All selected items are summing items
-        cascadingItems: [], // No cascading items in this logic
-        message: `Building towards ${targetBuildRank} with value ${totalBuildValue}.`
-    };
+    return { isValid: false, message: "Invalid build combination." };
 };
