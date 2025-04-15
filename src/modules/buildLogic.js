@@ -69,6 +69,10 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
 
     // --- Determine Target Rank from Played Card ---
     const targetBuildRank = playedCard.rank; // Rank declared by the played card (A, 2-10)
+    // const targetBuildValue = getBuildValue(playedCard); // Numerical value (1-10) - NO LONGER USED DIRECTLY
+    // if (targetBuildValue === 0) {
+    //     return { isValid: false, message: "Played card has no valid build value." };
+    // }
 
     // --- Separate Target Build (if modifying) and Other Items ---
     let targetBuild = null; // The existing build being modified (if any)
@@ -97,34 +101,10 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
     }
 
     const isModification = !!targetBuild;
+    const n = otherSelectedItems.length; // Number of table items selected
 
-    // --- Build Logic ---
-    let totalBuildValue = 0;
-
-    if (isModification) {
-        // --- Multi-Build (Adding to Existing Build) ---
-        if (otherSelectedItems.length === 0) {
-            return { isValid: false, message: "Must select additional cards to add to the existing build." };
-        }
-
-        totalBuildValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0) + getItemValue(targetBuild);
-
-        // Check if the new total build value can be captured with the target rank
-        const targetBuildValue = getBuildValue({ rank: targetBuildRank }); // Value needed to capture
-        if (totalBuildValue !== targetBuildValue) {
-            return { isValid: false, message: `The new build value (${totalBuildValue}) does not match the target rank (${targetBuildRank}).` };
-        }
-
-    } else {
-        // --- Single Build (Creating a New Build) ---
-        totalBuildValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
-
-        // Check if the initial build value can be captured with the target rank
-         const targetBuildValue = getBuildValue({ rank: targetBuildRank }); // Value needed to capture
-         if (totalBuildValue !== targetBuildValue) {
-             return { isValid: false, message: `The new build value (${totalBuildValue}) does not match the target rank (${targetBuildRank}).` };
-         }
-    }
+    // --- New Logic: Build to be captured later ---
+    let totalBuildValue = otherSelectedItems.reduce((sum, item) => sum + getItemValue(item), 0);
 
     // 1. Check for Holding Card (Check RANK)
     // Must hold another card matching the RANK declared by the played card.
@@ -137,7 +117,7 @@ export const validateBuild = (playedCard, selectedItems, playerHand, tableItems,
     }
 
     // 2. Duplicate Build Check (Rank-Based)
-    const existingPlayerBuildOfRank = tableItems.find(item =>
+     const existingPlayerBuildOfRank = tableItems.find(item =>
         item && item.id &&
         item.type === 'build' &&
         item.cards.some(card => card.rank === targetBuildRank) && // Check if ANY card in the build has the target rank
