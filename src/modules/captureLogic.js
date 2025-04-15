@@ -1,12 +1,12 @@
 // src/modules/captureLogic.js
-import { getValue, captureValues, combinationValue } from './deck';
+import { getValue, captureValues, combinationValue } from './deck'; // combinationValue might be unused now
 
 export class CaptureValidator {
 
     /**
      * Finds all valid sets of table items that can be captured by the played card.
-     * Includes rank matches, value matches (A=14), combination sums (A=1),
-     * and direct build value matches (A=1).
+     * Includes rank matches (cards/pairs), build captures (by targetRank),
+     * and combination sums (using captureValues).
      * @param {object} playedCard - The card played from the hand.
      * @param {array} tableItems - Current items on the table (cards, builds, pairs).
      * @returns {array<array<object>>} - An array of valid capture sets. Each set is an array of table items.
@@ -16,9 +16,8 @@ export class CaptureValidator {
 
         const validCaptureSets = [];
         const playedRank = playedCard.rank;
-        const playedCaptureValue = captureValues[playedRank]; // Value for build capture (A=14, J=11...)
-        const playedCombinationValue = combinationValue(playedRank); // Value for sum/direct match (A=1, 2=2...)
-        const isPlayedCardNumeric = !['J', 'Q', 'K'].includes(playedRank); // Ace is numeric here
+        const playedCaptureValue = captureValues[playedRank]; // Value for combination sums (A=14, J=11...)
+        // const playedCombinationValue = combinationValue(playedRank); // Value for sum/direct match (A=1, 2=2...) - Less relevant now for builds
 
         // --- 1. Capture by Rank (Cards and Pairs) ---
         const rankMatchItems = tableItems.filter(item =>
@@ -27,59 +26,56 @@ export class CaptureValidator {
              (item.type === 'pair' && item.rank === playedRank))
         );
         if (rankMatchItems.length > 0) {
+            // A single card captures ALL loose cards AND pairs of the same rank simultaneously
             validCaptureSets.push([...rankMatchItems]);
         }
 
-        // --- 2. Capture by Value (Only for Numeric Cards: 2-10, A) ---
-        if (isPlayedCardNumeric) {
-            // --- 2a. Capture Builds by Capture Value (A=14, etc.) ---
-            const buildCaptureValueMatches = tableItems.filter(item =>
-                item && item.id && item.type === 'build' && item.value === playedCaptureValue
-            );
-            buildCaptureValueMatches.forEach(build => {
-                validCaptureSets.push([build]);
-            });
+        // --- 2. Capture Builds by Target Rank Match ---
+        // This is the primary way to capture builds.
+        const buildRankMatches = tableItems.filter(item =>
+            item && item.id &&
+            item.type === 'build' &&
+            item.targetRank === playedRank // Check if build's targetRank matches played card's rank
+        );
+        // Each matching build is a *separate* capture option initially.
+        // The multi-capture logic in turns.js will handle selecting multiple.
+        buildRankMatches.forEach(build => {
+            validCaptureSets.push([build]); // Add each build as an individual capture set
+        });
 
-            // --- 2b. Capture by Combination Value (A=1, etc.) ---
-            const combinableItems = tableItems.filter(item =>
-                item && item.id && // Ensure item exists and has ID
-                ((item.type === 'card' && !['J', 'Q', 'K'].includes(item.rank)) ||
-                 (item.type === 'build' && !item.isCompound))
-            );
+        // --- 3. Capture Combinations by Sum (Using Capture Value: A=14, J=11...) ---
+        // This applies only to combining *loose cards* on the table. Builds/Pairs are not included here.
+        const combinableCards = tableItems.filter(item =>
+            item && item.id &&
+            item.type === 'card' && // Only cards
+            !isFaceCard(item) // Exclude J, Q, K from sums (though their captureValues exist)
+                               // Ace (A=14) *can* be used in sums if needed by ruleset
+                               // Let's stick to numeric cards 2-10 + A for sums for now.
+                               // Re-evaluate if J/Q/K sums are needed.
+                               // Using captureValues map for consistency (A=14).
+        );
 
-            if (combinableItems.length > 0) {
-                // --- 2b-i. Direct Build Match (using Combination Value A=1) ---
-                const directBuildMatches = combinableItems.filter(item =>
-                    item.type === 'build' && item.value === playedCombinationValue
-                );
-                directBuildMatches.forEach(build => {
-                    validCaptureSets.push([build]);
-                });
-
-                // --- 2b-ii. Capture Combinations Summing to Combination Value (A=1) ---
-                const n = combinableItems.length;
-                for (let i = 1; i < (1 << n); i++) {
-                    const subset = [];
-                    let currentSum = 0;
-                    for (let j = 0; j < n; j++) {
-                        if ((i >> j) & 1) {
-                            const item = combinableItems[j];
-                            // No need to check ID again here, already filtered in combinableItems
-                            subset.push(item);
-                            currentSum += (item.type === 'card' ? combinationValue(item.rank) : item.value);
-                        }
+        if (combinableCards.length > 0) {
+            const n = combinableCards.length;
+            for (let i = 1; i < (1 << n); i++) { // Iterate through all non-empty subsets
+                const subset = [];
+                let currentSum = 0;
+                for (let j = 0; j < n; j++) {
+                    if ((i >> j) & 1) {
+                        const item = combinableCards[j];
+                        subset.push(item);
+                        // Use captureValues for summing combinations
+                        currentSum += captureValues[item.rank] || 0; // Use map, default to 0 if somehow invalid
                     }
-                    if (currentSum === playedCombinationValue && subset.length > 0) {
-                        // Avoid adding subset if it's just the direct build match already added
-                        if (!(subset.length === 1 && subset[0].type === 'build' && directBuildMatches.some(db => db.id === subset[0].id))) {
-                           validCaptureSets.push(subset);
-                        }
-                    }
+                }
+                // Check if the subset sum matches the played card's capture value
+                if (currentSum === playedCaptureValue && subset.length > 0) {
+                    validCaptureSets.push(subset);
                 }
             }
         }
 
-        // --- 3. Remove duplicate sets (based on item IDs) ---
+        // --- 4. Remove duplicate sets (based on item IDs) ---
         const uniqueSets = [];
         const seenSetSignatures = new Set();
 
@@ -115,4 +111,10 @@ export const areItemSetsEqual = (set1, set2) => {
     const ids1 = set1.map(item => item.id).sort();
     const ids2 = set2.map(item => item.id).sort();
     return ids1.every((id, index) => id === ids2[index]);
+};
+
+// Helper function (can be moved or kept here)
+const isFaceCard = (card) => {
+    if (!card || !card.rank) return false;
+    return ['J', 'Q', 'K'].includes(card.rank);
 };
