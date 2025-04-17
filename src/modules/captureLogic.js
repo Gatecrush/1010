@@ -21,10 +21,12 @@ export class CaptureValidator {
         const isPlayedCardNumeric = !['J', 'Q', 'K'].includes(playedRank); // Ace is numeric here
 
         // --- 1. Capture by Rank (Cards and Pairs) ---
-        const rankMatchItems = tableItems.filter(item =>
-            item && item.id && // Ensure item exists and has ID
-            ((item.type === 'card' && item.rank === playedRank) ||
-             (item.type === 'pair' && item.rank === playedRank))
+        const rankMatchItems = tableItems.filter(
+            item =>
+                item &&
+                item.id &&
+                ((item.type === 'card' && item.rank === playedRank) ||
+                 (item.type === 'pair' && item.rank === playedRank))
         );
         if (rankMatchItems.length > 0) {
             validCaptureSets.push([...rankMatchItems]);
@@ -33,30 +35,36 @@ export class CaptureValidator {
         // --- 2. Capture by Value (Only for Numeric Cards: 2-10, A) ---
         if (isPlayedCardNumeric) {
             // --- 2a. Capture Builds by Capture Value (A=14, etc.) ---
-            const buildCaptureValueMatches = tableItems.filter(item =>
-                item && item.id && item.type === 'build' && item.value === playedCaptureValue
+            const buildCaptureValueMatches = tableItems.filter(
+                item =>
+                    item &&
+                    item.id &&
+                    item.type === 'build' &&
+                    item.value === playedCaptureValue
             );
             buildCaptureValueMatches.forEach(build => {
                 validCaptureSets.push([build]);
             });
 
             // --- 2b. Capture by Combination Value (A=1, etc.) ---
-            const combinableItems = tableItems.filter(item =>
-                item && item.id && // Ensure item exists and has ID
-                ((item.type === 'card' && !['J', 'Q', 'K'].includes(item.rank)) ||
-                 (item.type === 'build' && !item.isCompound))
+            const combinableItems = tableItems.filter(
+                item =>
+                    item &&
+                    item.id &&
+                    ((item.type === 'card' && !['J', 'Q', 'K'].includes(item.rank)) ||
+                     (item.type === 'build'))
             );
 
             if (combinableItems.length > 0) {
-                // --- 2b-i. Direct Build Match (using Combination Value A=1) ---
-                const directBuildMatches = combinableItems.filter(item =>
-                    item.type === 'build' && item.value === playedCombinationValue
+                // --- 2b-i. Direct Build Match (A=1) ---
+                const directBuildMatches = combinableItems.filter(
+                    item => item.type === 'build' && item.value === playedCombinationValue
                 );
                 directBuildMatches.forEach(build => {
                     validCaptureSets.push([build]);
                 });
 
-                // --- 2b-ii. Capture Combinations Summing to Combination Value (A=1) ---
+                // --- 2b-ii. Capture Combinations Summing to Combination Value ---
                 const n = combinableItems.length;
                 for (let i = 1; i < (1 << n); i++) {
                     const subset = [];
@@ -64,27 +72,24 @@ export class CaptureValidator {
                     for (let j = 0; j < n; j++) {
                         if ((i >> j) & 1) {
                             const item = combinableItems[j];
-                            // No need to check ID again here, already filtered in combinableItems
                             subset.push(item);
-                            currentSum += (item.type === 'card' ? combinationValue(item.rank) : item.value);
+                            currentSum += item.type === 'card' ? combinationValue(item.rank) : item.value;
                         }
                     }
                     if (currentSum === playedCombinationValue && subset.length > 0) {
-                        // Avoid adding subset if it's just the direct build match already added
                         if (!(subset.length === 1 && subset[0].type === 'build' && directBuildMatches.some(db => db.id === subset[0].id))) {
-                           validCaptureSets.push(subset);
+                            validCaptureSets.push(subset);
                         }
                     }
                 }
             }
         }
 
-        // --- 3. Remove duplicate sets (based on item IDs) ---
+        // --- 3. Remove duplicate sets ---
         const uniqueSets = [];
         const seenSetSignatures = new Set();
 
         validCaptureSets.forEach(set => {
-            // Ensure all items in the set have an ID before creating signature
             if (set.every(item => item && item.id)) {
                 const signature = set.map(item => item.id).sort().join(',');
                 if (!seenSetSignatures.has(signature)) {
@@ -92,12 +97,10 @@ export class CaptureValidator {
                     uniqueSets.push(set);
                 }
             } else {
-                // This should not happen if filtering above is correct
                 console.error("Capture set generation error: item missing ID in final set:", set);
             }
         });
 
-        // console.log("Generated Valid Captures for", playedCard.suitRank, ":", uniqueSets.map(s => s.map(i => i.id || i.suitRank))); // Debug Log
         return uniqueSets;
     }
 }

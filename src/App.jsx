@@ -327,7 +327,6 @@ function App() {
             return prevSelected.filter(i => i.id !== item.id); // Deselect
           } else {
             // Prevent selecting compound builds if trying to build (simple build logic)
-            // More complex validation might be needed depending on action intent
             /* if (item.type === 'build' && item.isCompound) {
                 alert("Cannot select a compound build for this action."); // Inform user
                 return prevSelected; // Don't add the compound build
@@ -380,19 +379,35 @@ function App() {
       const canClickTableItem = selectedCard && !hasPlayedCard;
       const uniqueId = build.id; // Builds should always have an ID from handleBuild
 
-      return (
-        <div
-          key={uniqueId} // Use unique key for build
-          className={`build ${isTableItemSelected ? 'selected-table-card' : ''} ${canClickTableItem ? '' : 'disabled'} ${build.isCompound ? 'compound-build' : 'simple-build'}`} // Add classes for type
-          onClick={() => canClickTableItem && selectTableItem(build)} // Pass the whole build object (with ID)
-          title={`Cards: ${build.cards.map(c => c.rank + c.suit).join(', ')} Controller: P${build.controller} ${build.isCompound ? '(Compound)' : '(Simple)'}`} // Tooltip
+      if (build.isCompound) {
+        return (
+          <div
+            key={uniqueId}
+            className={`build ${isTableItemSelected ? 'selected-table-card' : ''} ${canClickTableItem ? '' : 'disabled'} compound-build`}
+            onClick={() => canClickTableItem && selectTableItem(build)}
+            title={`Multi-Build: ${build.builds ? build.builds.map(b => `[${b.cards.map(c => c.rank + c.suit).join('+')}]`).join(', ') : ''} = ${build.value}, Controller: P${build.controller}`}
+          >
+            <div className="build-value">Multi-Build {build.value}</div>
+            <div className="build-cards">
+              {build.builds && build.builds.map((b, i) => (
+                <span key={i}>[{b.cards.map(c => c.rank + c.suit).join('+')}] </span>
+              ))}
+            </div>
+          </div>
+        );
+      } else {
+        return (
+          <div
+            key={uniqueId}
+            className={`build ${isTableItemSelected ? 'selected-table-card' : ''} ${canClickTableItem ? '' : 'disabled'} simple-build`}
+            onClick={() => canClickTableItem && selectTableItem(build)}
+            title={`Cards: ${build.cards.map(c => c.rank + c.suit).join(', ')} Controller: P${build.controller}`}
           >
             <div className="build-value">Build {build.value}</div>
-            {/* Basic representation - maybe show top card or count */}
             <div className="build-cards">({build.cards.length} cards)</div>
-            {/* Removed incorrect rank/suit divs from here */}
-        </div>
-      );
+          </div>
+        );
+      }
     }
 
     // --- Render Pair on Table ---
@@ -508,51 +523,49 @@ function App() {
   // --- Rule Enforcement Calculations ---
   const playerControlsBuild = tableItems.some(item => item.type === 'build' && item.controller === currentPlayer);
   const playerControlsPair = tableItems.some(item => item.type === 'pair' && item.controller === currentPlayer);
-
-  // Helper to check if the selected card is the last one matching a controlled build
+  
   const isLastCapturingCardForControlledBuild = (cardToCheck, hand, currentTableItems, playerNum) => {
-      if (!cardToCheck) return false;
-      const controlledBuilds = currentTableItems.filter(item => item.type === 'build' && item.controller === playerNum);
-      if (controlledBuilds.length === 0) return false;
+    if (!cardToCheck) return false;
+    const controlledBuilds = currentTableItems.filter(item => item.type === 'build' && item.controller === playerNum);
+    if (controlledBuilds.length === 0) return false;
 
-      const buildValue = (rank) => rank === 'A' ? 1 : getValue(rank); // Ace=1 for builds
+    const buildValue = (rank) => rank === 'A' ? 1 : getValue(rank); // Ace=1 for builds
 
-      return controlledBuilds.some(build => {
-          // Is the selected card the one needed to capture this build?
-          const isSelectedCardMatcher = buildValue(cardToCheck.rank) === build.value;
-          if (!isSelectedCardMatcher) return false;
+    return controlledBuilds.some(build => {
+        // Is the selected card the one needed to capture this build?
+        const isSelectedCardMatcher = buildValue(cardToCheck.rank) === build.value;
+        if (!isSelectedCardMatcher) return false;
 
-          // Count how many cards in hand match the build value
-          const matchingCardCount = hand.filter(c => buildValue(c.rank) === build.value).length;
-          return matchingCardCount === 1; // If only one matches, it's the last one
-      });
+        // Count how many cards in hand match the build value
+        const matchingCardCount = hand.filter(c => buildValue(c.rank) === build.value).length;
+        return matchingCardCount === 1; // If only one matches, it's the last one
+    });
   };
-
-  // Calculate if the current selection forces capture of a controlled build
   const mustCaptureControlledBuild = () => {
-      if (!selectedCard || !playerControlsBuild) return false;
+    if (!selectedCard || !playerControlsBuild) return false;
 
-      const hand = currentPlayer === 1 ? player1Hand : player2Hand;
-      const isLastCard = isLastCapturingCardForControlledBuild(selectedCard, hand, tableItems, currentPlayer);
-      if (!isLastCard) return false;
+    const hand = currentPlayer === 1 ? player1Hand : player2Hand;
+    const isLastCard = isLastCapturingCardForControlledBuild(selectedCard, hand, tableItems, currentPlayer);
+    if (!isLastCard) return false;
 
-      // Find the specific build(s) this card is the last capturer for
-      const buildValue = (rank) => rank === 'A' ? 1 : getValue(rank);
-      const targetBuildValue = buildValue(selectedCard.rank);
-      const matchingControlledBuilds = tableItems.filter(item =>
-          item.type === 'build' &&
-          item.controller === currentPlayer &&
-          item.value === targetBuildValue
-      );
+    // Find the specific build(s) this card is the last capturer for
+    const buildValue = (rank) => rank === 'A' ? 1 : getValue(rank);
+    const targetBuildValue = buildValue(selectedCard.rank);
+    const matchingControlledBuilds = tableItems.filter(item =>
+        item.type === 'build' &&
+        item.controller === currentPlayer &&
+        item.value === targetBuildValue
+    );
 
-      // Check if the selected table items *only* contain one of these required builds
-      if (selectedTableItems.length === 1 && selectedTableItems[0].type === 'build') {
-          return matchingControlledBuilds.some(build => build.id === selectedTableItems[0].id);
-      }
+    // Check if the selected table items *only* contain one of these required builds
+    if (selectedTableItems.length === 1 && selectedTableItems[0].type === 'build') {
+        return matchingControlledBuilds.some(build => build.id === selectedTableItems[0].id);
+    }
 
-      return false; // If multiple items selected, or wrong item selected, it's not a forced capture (yet)
+    return false; // If multiple items selected, or wrong item selected, it's not a forced capture (yet)
   };
 
+  // --- Disable States for Buttons ---
   const disableTrail = !selectedCard || hasPlayedCard || selectedTableItems.length > 0 || playerControlsBuild || playerControlsPair || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
   const disableCapture = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || (isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer) && !mustCaptureControlledBuild());
   const disableBuild = !selectedCard || selectedTableItems.length === 0 || hasPlayedCard || isLastCapturingCardForControlledBuild(selectedCard, currentPlayer === 1 ? player1Hand : player2Hand, tableItems, currentPlayer);
@@ -561,7 +574,7 @@ function App() {
 
   return (
     <div className="App">
-      <h1>Omlongo♦</h1> {/* Changed heading here */}
+      <h1>Dash♦</h1> {/* Changed heading here */}
       {gamePhase === 'initialDeal' && (
         <button onClick={initializeDeal}>Deal Initial Cards</button>
       )}
@@ -651,4 +664,21 @@ function App() {
   );
 }
 
+  const isLastCapturingCardForControlledBuild = (cardToCheck, hand, currentTableItems, playerNum) => {
+    if (!cardToCheck) return false;
+    const controlledBuilds = currentTableItems.filter(item => item.type === 'build' && item.controller === playerNum);
+    if (controlledBuilds.length === 0) return false;
+
+    const buildValue = (rank) => rank === 'A' ? 1 : getValue(rank); // Ace=1 for builds
+
+    return controlledBuilds.some(build => {
+        // Is the selected card the one needed to capture this build?
+        const isSelectedCardMatcher = buildValue(cardToCheck.rank) === build.value;
+        if (!isSelectedCardMatcher) return false;
+
+        // Count how many cards in hand match the build value
+        const matchingCardCount = hand.filter(c => buildValue(c.rank) === build.value).length;
+        return matchingCardCount === 1; // If only one matches, it's the last one
+    });
+  };
 export default App;

@@ -14,84 +14,96 @@ const generatePairId = () => `pair-${nextPairId++}`;
  * Handles the build action, using the validated summing/cascading groups.
  */
 export const handleBuild = (playedCard, selectedItems, currentPlayer, tableItems, playerHand) => {
-    // Pass all necessary context to validateBuild
     const validation = validateBuild(playedCard, selectedItems, playerHand, tableItems, currentPlayer);
     if (!validation.isValid) {
       return { success: false, newTableItems: tableItems, message: validation.message };
     }
-    // Get detailed results from validation
-    const { buildValue, isModification, targetBuild, summingItems, cascadingItems } = validation;
 
+    const { buildValue, isModification, targetBuild, summingItems, cascadingItems, isMultiBuildCreation, multiBuildBuilds, isMultiBuildIncrease } = validation;
+    let newTableItems = [...tableItems];
     let newBuildObject;
-    // IDs of ALL originally selected items need to be removed or replaced
-    let originalSelectionIds = selectedItems.map(item => item.id);
 
-    // --- Collect all cards for the new/updated build ---
-    let finalBuildCards = [playedCard]; // Played card always goes into the build
-
-    // Add cards from the summingItems
-    summingItems.forEach(item => {
-        if (!item || !item.type) return; // Safety check
-        if (item.type === 'card') { finalBuildCards.push(item); }
-        else if (item.type === 'build' && item.cards) { finalBuildCards.push(...item.cards); }
-    });
-
-    // Add cards from the cascadingItems
-    cascadingItems.forEach(item => {
-         if (!item || !item.type) return; // Safety check
-        if (item.type === 'card') { finalBuildCards.push(item); }
-        else if (item.type === 'build' && item.cards) { finalBuildCards.push(...item.cards); }
-    });
-
-    // If it was a modification, add the original cards from the targetBuild
-    // Ensure not to double-add if targetBuild was also in summing/cascading
-    if (isModification && targetBuild && targetBuild.cards) {
-        if (!summingItems.some(i => i.id === targetBuild.id) && !cascadingItems.some(i => i.id === targetBuild.id)) {
-             finalBuildCards.push(...targetBuild.cards);
-        }
-    }
-
-    // --- Determine if the final build is compound ---
-    // Compound if modifying, or if multiple items contributed (summing + cascading > 0),
-    // or if any contributing item was itself a build.
-    let isCompound = isModification ||
-                     (summingItems.length + cascadingItems.length > 0) ||
-                     summingItems.some(i => i.type === 'build') ||
-                     cascadingItems.some(i => i.type === 'build');
-
-
-    // --- Create or update the build object ---
-    if (isModification && targetBuild) {
+    if (isMultiBuildCreation) {
         newBuildObject = {
-            ...targetBuild, // Keep original ID
-            cards: finalBuildCards,
-            controller: currentPlayer, // Update controller
-            isCompound: isCompound, // Update compound status
-            value: buildValue // Ensure value is correct
+            type: 'build',
+            id: `multibuild-${Date.now()}`,
+            builds: multiBuildBuilds,
+            value: buildValue,
+            controller: currentPlayer,
+            isCompound: true
+        };
+        newTableItems = newTableItems.filter(
+            item => !selectedItems.some(sel => sel.id === item.id)
+        );
+        newTableItems.push(newBuildObject);
+        return {
+            success: true,
+            newTableItems,
+            message: `Player ${currentPlayer} created Multi-Build of ${buildValue}.`
+        };
+    } else if (isMultiBuildIncrease) {
+        const newBuild = {
+            cards: [playedCard, ...summingItems],
+            value: buildValue
+        };
+        newTableItems = newTableItems.map(item => {
+            if (item.id === targetBuild.id) {
+                return {
+                    ...item,
+                    builds: [...item.builds, newBuild],
+                    controller: currentPlayer,
+                    isCompound: true
+                };
+            }
+            return item;
+        });
+        newTableItems = newTableItems.filter(
+            item => !summingItems.some(sel => sel.id === item.id)
+        );
+        return {
+            success: true,
+            newTableItems,
+            message: `Player ${currentPlayer} increased Multi-Build of ${buildValue}.`
         };
     } else {
+        let finalBuildCards = [playedCard];
+        summingItems.forEach(item => {
+            if (item.type === 'card') finalBuildCards.push(item);
+            else if (item.type === 'build') finalBuildCards.push(...item.cards);
+        });
+        cascadingItems.forEach(item => {
+            if (item.type === 'card') finalBuildCards.push(item);
+            else if (item.type === 'build') finalBuildCards.push(...item.cards);
+        });
+        if (isModification && targetBuild) {
+            finalBuildCards.push(...targetBuild.cards.filter(
+                c => !summingItems.some(i => i.id === targetBuild.id) && !cascadingItems.some(i => i.id === targetBuild.id)
+            ));
+        }
+
         newBuildObject = {
-          type: 'build',
-          id: generateBuildId(),
-          value: buildValue, // Use the calculated buildValue
-          cards: finalBuildCards,
-          controller: currentPlayer,
-          isCompound: isCompound,
+            type: 'build',
+            id: generateBuildId(),
+            value: buildValue,
+            cards: finalBuildCards,
+            controller: currentPlayer,
+            isCompound: false
+        };
+
+        if (isModification && targetBuild) {
+            newBuildObject.id = targetBuild.id;
+        }
+
+        newTableItems = newTableItems.filter(
+            item => (!targetBuild || item.id !== targetBuild.id) && !selectedItems.some(sel => sel.id === item.id)
+        );
+        newTableItems.push(newBuildObject);
+        return {
+            success: true,
+            newTableItems,
+            message: `Player ${currentPlayer} built ${buildValue}.`
         };
     }
-
-    // --- Update the table items ---
-    // 1. Filter out ALL originally selected items
-    let updatedTableItems = tableItems.filter(item => item && item.id && !originalSelectionIds.includes(item.id));
-    // 2. Add the new/updated build object
-    updatedTableItems.push(newBuildObject);
-
-
-    return {
-      success: true,
-      newTableItems: updatedTableItems,
-      message: `Player ${currentPlayer} built ${buildValue}. ${isCompound ? '(Compound)' : '(Simple)'}` // Use buildValue in message
-    };
 };
 
 /**
@@ -242,13 +254,28 @@ export const handleCapture = (playedCard, selectedItems, currentPlayer,
     if (!isSelectionValid) {
         return {
             success: false,
-            newP1Score: player1Score, newP2Score: player2Score,
-            newTableItems: tableItems, newLastCapturer: lastCapturer,
-            message: "Invalid capture selection.", capturedCards: []
+            newP1Score: player1Score,
+            newP2Score: player2Score,
+            newTableItems: tableItems,
+            newLastCapturer: lastCapturer,
+            message: "Invalid capture selection.",
+            capturedCards: []
         };
     }
 
-    // Process the valid capture
+    // Check ownership for Builds
+    if (selectedItems.some(item => item.type === 'build' && item.controller !== currentPlayer)) {
+        return {
+            success: false,
+            newP1Score: player1Score,
+            newP2Score: player2Score,
+            newTableItems: tableItems,
+            newLastCapturer: lastCapturer,
+            message: "Cannot capture Builds you don’t control.",
+            capturedCards: []
+        };
+    }
+
     let capturedCards = [playedCard];
     let currentP1Score = player1Score;
     let currentP2Score = player2Score;
@@ -256,11 +283,11 @@ export const handleCapture = (playedCard, selectedItems, currentPlayer,
     selectedItems.forEach(item => {
         if (!item) { console.error("Undefined item in selectedItems during capture processing"); return; }
         if (item.type === 'card') { capturedCards.push(item); }
-        else if (item.type === 'build' || item.type === 'pair') {
+        else if (item.type === 'build') {
              if (item.cards && Array.isArray(item.cards)) {
                  capturedCards.push(...item.cards);
              } else {
-                 console.error("Build/Pair item missing cards array:", item);
+                 console.error("Build item missing cards array:", item);
              }
         }
     });
@@ -268,31 +295,38 @@ export const handleCapture = (playedCard, selectedItems, currentPlayer,
     // Remove captured items from the table
      if (!selectedItems.every(item => item && item.id)) {
         console.error("Cannot remove items - selection contains items without IDs");
-        return { success: false, message: "Internal error: Selected items missing IDs.", /* ... other state ... */ };
+        return {
+            success: false,
+            message: "Internal error: Selected items missing IDs.",
+            newP1Score: player1Score,
+            newP2Score: player2Score,
+            newTableItems: tableItems,
+            newLastCapturer: lastCapturer,
+            capturedCards: []
+        };
     }
     const selectedItemIds = selectedItems.map(item => item.id);
-    // Ensure tableItems are valid before filtering
     const validTableItems = tableItems.filter(item => item && item.id);
     const newTableItems = validTableItems.filter(item => !selectedItemIds.includes(item.id));
-
 
     // Check for sweep
     let sweepMessage = "";
     // Sweep occurs if the table is cleared AND the table wasn't empty before the capture
     if (newTableItems.length === 0 && validTableItems.length > 0) {
-        if (currentPlayer === 1) { currentP1Score += 1; }
-        else { currentP2Score += 1; }
+        if (currentPlayer === 1) {
+            player1Score += 1;
+        } else {
+            player2Score += 1;
+        }
         sweepMessage = " Sweep!";
     }
-
-    const newLastCapturer = currentPlayer;
 
     return {
         success: true,
         newP1Score: currentP1Score,
         newP2Score: currentP2Score,
         newTableItems: newTableItems,
-        newLastCapturer: newLastCapturer,
+        newLastCapturer: currentPlayer,
         message: `Player ${currentPlayer} captured ${selectedItems.length} item(s).${sweepMessage}`,
         capturedCards: capturedCards
     };
